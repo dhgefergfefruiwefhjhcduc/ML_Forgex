@@ -117,5 +117,4 @@ Email: mathurpriyanshu2006@gmail.com
 
 ## Project Links
 
-- [PyPI](https://pypi.org/project/mlforge/)
-- [GitHub](https://github.com/yourusername/mlforge)
+- [PyPI](https://pypi.org/project/mlforgex/1.0.0/)
