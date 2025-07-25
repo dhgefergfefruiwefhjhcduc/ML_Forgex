@@ -1,4 +1,4 @@
-# MLForge
+# ML_Forgex
 
 **MLForge** is a Python package that enables easy training, evaluation, and prediction for machine learning models. It supports both classification and regression problems, automates preprocessing, model selection, hyperparameter tuning, and generates useful artifacts and plots for analysis.
 
