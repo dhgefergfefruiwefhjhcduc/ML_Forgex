@@ -1,6 +1,6 @@
-# ML_Forgex
+# mlforgex
 
-**MLForge** is a Python package that enables easy training, evaluation, and prediction for machine learning models. It supports both classification and regression problems, automates preprocessing, model selection, hyperparameter tuning, and generates useful artifacts and plots for analysis.
+**mlforgex** is a Python package that enables easy training, evaluation, and prediction for machine learning models on cleaned dataset. It supports both classification and regression problems, automates preprocessing, model selection, hyperparameter tuning, and generates useful artifacts and plots for analysis.
 
 ## Features
 
@@ -14,18 +14,12 @@
 
 ## Installation
 
-Install MLForge using pip:
+Install mlforge using pip:
 
 ```sh
-pip install mlforge
+pip install mlforgex
 ```
-
-Or clone the repository and install locally:
-
-```sh
-git clone https://github.com/yourusername/mlforge.git
-cd mlforge
-pip install .
+stall .
 ```
 
 ## Requirements
@@ -48,7 +42,7 @@ See [requirements.txt](requirements.txt) for details.
 You can train a model using the CLI:
 
 ```sh
-mlforge-train --data mlforge/diabetes_cleaned.csv --target Outcome --rmse 0.3 --f1 0.7
+mlforge-train --data_path path/to/your/data.csv --dependent_feature TargetColumn --rmse_prob 0.3 --f1_prob 0.7 --n_jobs -1 --n_iter 100 --cv 3
 ```
 
 Or programmatically:
@@ -57,11 +51,11 @@ Or programmatically:
 from mlforge import train_model
 
 result = train_model(
-    "mlforge/diabetes_cleaned.csv",
-    "Outcome",
-    rmse_prob=0.3,
-    f1_prob=0.7,
-    n_jobs=-1
+    data_path=<data_path>,
+    dependent_feature=<dependent_feature>,
+    rmse_prob=<rmse_probability>,
+    f1_prob=<f1_probability>,
+    n_jobs=<n_jobs>
 )
 print(result)
 ```
@@ -71,7 +65,7 @@ print(result)
 Use the CLI:
 
 ```sh
-mlforge-predict --model mlforge/artifacts/model.pkl --preprocessor mlforge/artifacts/preprocessor.pkl --input mlforge/input.csv --encoder mlforge/artifacts/encoder.pkl
+mlforge-predict --model_path path/to/model.pkl --preprocessor_path path/to/preprocessor.pkl --input_data path/to/input.csv --encoder_path path/to/encoder.pkl
 ```
 
 Or programmatically:
@@ -80,17 +74,17 @@ Or programmatically:
 from mlforge import predict
 
 result = predict(
-    "mlforge/artifacts/model.pkl",
-    "mlforge/artifacts/preprocessor.pkl",
-    "mlforge/input.csv",
-    "mlforge/artifacts/encoder.pkl"
+    <model.pkl>,
+    <preprocessor.pkl>,
+    <input_data.csv>,
+    <encoder.pkl>
 )
 print(result)
 ```
 
 ## Artifacts
 
-After training, the following files are saved in `mlforge/artifacts/`:
+After training, the following files are saved :
 
 - `model.pkl`: Trained model
 - `preprocessor.pkl`: Preprocessing pipeline
@@ -104,11 +98,6 @@ Run tests using pytest:
 ```sh
 pytest test/
 ```
-
-## License
-
-[MIT License](https://github.com/dhgefergfefruiwefhjhcduc/ML_Forge?tab=MIT-1-ov-file)
-
 ## Author
 
 Priyanshu Mathur  
@@ -117,4 +106,4 @@ Email: mathurpriyanshu2006@gmail.com
 
 ## Project Links
 
-- [PyPI](https://pypi.org/project/mlforgex/1.0.0/)
+- [PyPI](https://pypi.org/project/mlforgex/)

@@ -1,14 +1,24 @@
 from setuptools import setup, find_packages
+from pathlib import Path
 
+this_directory = Path(__file__).parent
+long_description = (this_directory / "README.md").read_text()
 setup(
     name="mlforgex",
-    version="1.0.0",
+    version="1.0.3",
     packages=find_packages(),
-    install_requires=[
-        "pandas",
-        "numpy",
-        "scikit-learn"
-    ],
+    install_requires = [
+    "pandas",
+    "numpy",
+    "seaborn",
+    "matplotlib",
+    "scikit-learn",
+    "xgboost",
+    "imbalanced-learn"
+]
+,
+    long_description=long_description,
+    long_description_content_type="text/markdown",
     entry_points={
         "console_scripts": [
             "mlforge-train=mlforge.train:main",
@@ -17,9 +27,11 @@ setup(
     },
     author="Priyanshu Mathur",
     author_email="mathurpriyanshu2006@gmail.com",
-    description="MLForge: Train and evaluate ML models easily",
+    description="Lightweight ML utility for automated training, evaluation, and prediction with CLI and Python API support",
     url="https://github.com/yourusername/mlforge",
+    license="MIT",
     classifiers=[
+         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3",
         "Operating System :: OS Independent",
     ],

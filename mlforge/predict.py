@@ -14,10 +14,10 @@ def predict(model_path,preprocessor_path,input_data, encoder_path=None):
 def main():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", required=True)
-    parser.add_argument("--input", required=True)
-    parser.add_argument("--preprocessor", required=True)
-    parser.add_argument("--encoder", required=False)
+    parser.add_argument("--model_path", required=True)
+    parser.add_argument("--input_data", required=True)
+    parser.add_argument("--preprocessor_path", required=True)
+    parser.add_argument("--encoder_path", required=False)
     args = parser.parse_args()
-    print(predict(args.model, args.preprocessor, args.input, args.encoder))
+    print(predict(args.model_path, args.preprocessor_path, args.input_data, args.encoder_path))
 

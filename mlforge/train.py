@@ -25,9 +25,12 @@ from sklearn.inspection import permutation_importance
 from sklearn.model_selection import learning_curve
 import warnings
 warnings.filterwarnings("ignore")
-artifacts_path=os.path.join(os.path.dirname(__file__),"artifacts")
-plot_path=os.path.join(artifacts_path,"Plots")
-def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=100,cv=3):
+def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=100,cv=3,artifacts_dir=None):
+    if artifacts_dir:
+        artifacts_path = os.path.join(artifacts_dir, "artifacts")
+    else:
+        artifacts_path = os.path.join(os.getcwd(), "artifacts")
+    plot_path=os.path.join(artifacts_path,"Plots")
     os.makedirs(artifacts_path,exist_ok=True)
     print("Getting data from:",data_path)
     data=pd.read_csv(data_path)
@@ -35,13 +38,13 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     # os.remove(data_path)
     df.head()
     print("Data loaded successfully")
-
+    df.replace(["", "NA", "na", "N/A", "n/a", "?", "--"], np.nan, inplace=True)
     for i in df.columns:
         if df[i].dtype=="object":
             df[i] = df[i].fillna(df[i].mode()[0])
         else:
             df[i] = df[i].fillna(df[i].median())
-            
+    df.drop_duplicates(inplace=True, ignore_index=True)
     mild=False
     moderate=False
     majority=max(df[dependent_feature].value_counts())
@@ -113,17 +116,20 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     num_features = [i for i in x_train.columns if x_train[i].dtype != "object" and i != dependent_feature]
     print("Categorical features : ",cat_features)
     print("Numerical features : ",num_features)
-    print("Balancing the dataset...")
-    if mild:
-        from imblearn.under_sampling import RandomUnderSampler
-        undersampler = RandomUnderSampler(random_state=42)
-        x_train, y_train = undersampler.fit_resample(x_train, y_train)
-        print("Mild Imbalance Resolved")
-    if moderate:
-        from imblearn.over_sampling import SMOTETomek
-        smote_tomek = SMOTETomek(random_state=42)
-        x_train, y_train = smote_tomek.fit_resample(x_train, y_train)
-        print("Moderate Imbalace Resolved")
+    if classification:
+        is_multiclass = len(set(y_train)) > 2
+        average_type = "weighted" if is_multiclass else "binary"
+        print("Balancing the dataset...")
+        if mild :
+            from imblearn.under_sampling import RandomUnderSampler
+            undersampler = RandomUnderSampler(random_state=42)
+            x_train, y_train = undersampler.fit_resample(x_train, y_train)
+            print("Mild Imbalance Resolved")
+        if moderate:
+            from imblearn.over_sampling import SMOTETomek
+            smote_tomek = SMOTETomek(random_state=42)
+            x_train, y_train = smote_tomek.fit_resample(x_train, y_train)
+            print("Moderate Imbalace Resolved")
 
 
     
@@ -241,7 +247,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         "AdaBoostClassifier":AdaBoostClassifier(),
         "XGBClassifier":XGBClassifier(),
         "KNeighborsClassifier":KNeighborsClassifier(),
-        "SVC":SVC()
+        "SVC":SVC(probability=True)
     }
     
         for i in range(len(list(models))):
@@ -254,15 +260,26 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
 
             # Training set performance
             model_train_accuracy = accuracy_score(y_train, y_train_pred) # Calculate Accuracy
-            model_train_f1 = f1_score(y_train, y_train_pred, average='weighted') # Calculate F1-score
-            model_train_precision = precision_score(y_train, y_train_pred) # Calculate Precision
-            model_train_recall = recall_score(y_train, y_train_pred) # Calculate Recall
-            model_train_rocauc_score = roc_auc_score(y_train, y_train_pred)
+            model_train_f1 = f1_score(y_train, y_train_pred, average=average_type) # Calculate F1-score
+            model_train_precision = precision_score(y_train, y_train_pred, average=average_type) # Calculate Precision
+            model_train_recall = recall_score(y_train, y_train_pred, average=average_type) # Calculate Recall
+            if average_type == "binary":
+                y_train_prob = model.predict_proba(x_train)[:,1]
+                model_train_rocauc_score = roc_auc_score(y_train, y_train_prob)
+            else:
+                y_train_prob=model.predict_proba(x_train)
+                model_train_rocauc_score = roc_auc_score(y_train, y_train_prob,multi_class='ovr',average=average_type) #Calculate Roc Auc Score
             # Test set performance
             model_test_accuracy = accuracy_score(y_test, y_test_pred) # Calculate Accuracy
-            model_test_f1 = f1_score(y_test, y_test_pred, average='weighted') # Calculate F1-score
-            model_test_precision = precision_score(y_test, y_test_pred) # Calculate Precision
-            model_test_recall = recall_score(y_test, y_test_pred) # Calculate Recal
+            model_test_f1 = f1_score(y_test, y_test_pred, average=average_type) # Calculate F1-score
+            model_test_precision = precision_score(y_test, y_test_pred, average=average_type) # Calculate Precision
+            model_test_recall = recall_score(y_test, y_test_pred, average=average_type) # Calculate Recall
+            if average_type == "binary":
+                y_test_prob = model.predict_proba(x_test)[:,1]
+                model_test_rocauc_score = roc_auc_score(y_test, y_test_prob)
+            else:
+                y_test_prob=model.predict_proba(x_test)
+                model_test_rocauc_score = roc_auc_score(y_test, y_test_prob,multi_class='ovr',average=average_type) #Calculate Roc Auc Score
 
             model_dict.append({
                 "model":list(models.keys())[i],
@@ -272,7 +289,6 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
                 "test_f1": model_test_f1,
                 "tuned":False
             })
-            model_test_rocauc_score = roc_auc_score(y_test, y_test_pred) #Calculate Roc
 
 
             # print(list(models.keys())[i])
@@ -443,7 +459,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
             ["LogisticRegression", {
                 'penalty': ['l1', 'l2', 'elasticnet', 'none'],
                 'C': np.logspace(-4, 4, 20),
-                'solver': ['newton-cg', 'lbfgs', 'liblinear', 'sag', 'saga'],
+                'solver': ['lbfgs', 'liblinear', 'saga'],
                 'max_iter': [100, 200, 500, 1000],
                 'class_weight': [None, 'balanced'],
                 'l1_ratio': [0, 0.25, 0.5, 0.75, 1]  # For elasticnet
@@ -593,7 +609,6 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         for i in range(len(list(models))):
             model = list(models.values())[i]
             model.fit(x_train, y_train) # Train model
-
             # Make predictions
             y_train_pred = model.predict(x_train)
             y_test_pred = model.predict(x_test)
@@ -654,22 +669,38 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
 
             # Training set performance
             model_train_accuracy = accuracy_score(y_train, y_train_pred) # Calculate Accuracy
-            model_train_f1 = f1_score(y_train, y_train_pred, average='weighted') # Calculate F1-score
-            model_train_precision = precision_score(y_train, y_train_pred) # Calculate Precision
-            model_train_recall = recall_score(y_train, y_train_pred) # Calculate Recall
-            model_train_rocauc_score = roc_auc_score(y_train, y_train_pred)
+            model_train_f1 = f1_score(y_train, y_train_pred, average=average_type) # Calculate F1-score
+            model_train_precision = precision_score(y_train, y_train_pred,average=average_type) # Calculate Precision
+            model_train_recall = recall_score(y_train, y_train_pred,average=average_type) # Calculate Recall
+            if average_type == "binary":
+                y_train_prob = model.predict_proba(x_train)[:,1]
+                model_train_rocauc_score = roc_auc_score(y_train, y_train_prob)
+            else:
+                y_train_prob=model.predict_proba(x_train)
+                model_train_rocauc_score = roc_auc_score(y_train, y_train_prob, multi_class='ovr', average=average_type)
             # Test set performance
             model_test_accuracy = accuracy_score(y_test, y_test_pred) # Calculate Accuracy
-            model_test_f1 = f1_score(y_test, y_test_pred, average='weighted') # Calculate F1-score
-            model_test_precision = precision_score(y_test, y_test_pred) # Calculate Precision
-            model_test_recall = recall_score(y_test, y_test_pred) # Calculate Recal
-
+            model_test_f1 = f1_score(y_test, y_test_pred, average=average_type) # Calculate F1-score
+            model_test_precision = precision_score(y_test, y_test_pred,average=average_type) # Calculate Precision
+            model_test_recall = recall_score(y_test, y_test_pred,average=average_type) # Calculate Recall
+            if average_type == "binary":
+                y_test_prob = model.predict_proba(x_test)[:,1]
+                model_test_rocauc_score = roc_auc_score(y_test, y_test_prob)
+            else:
+                y_test_prob=model.predict_proba(x_test)
+                model_test_rocauc_score = roc_auc_score(y_test, y_test_prob, multi_class='ovr', average=average_type)
             model_dict={
             "model":list(models.keys())[i],
             "train_accuracy": model_train_accuracy,
             "train_f1": model_train_f1,
+            "train_precision": model_train_precision,
+            "train_recall": model_train_recall,
+            "train_rocauc": model_train_rocauc_score,
             "test_accuracy": model_test_accuracy,
             "test_f1": model_test_f1,
+            "test_precision": model_test_precision,
+            "test_recall": model_test_recall,
+            "test_rocauc": model_test_rocauc_score,
             "tuned":True
         }
             best_models_copy = pd.concat(
@@ -723,7 +754,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     if classification:
         combined_score_ranking=combined_score_ranking[combined_score_ranking["train_f1"]-combined_score_ranking["test_f1"]<0.15]
     # print("====="*35)
-    print(combined_score_ranking.iloc[0:1,:])
+    # print(combined_score_ranking.iloc[0:1,:])
     best_model_name = combined_score_ranking.iloc[0]["model"]
     best_param_dict = None
     for name, params in best_params:
@@ -738,7 +769,6 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     print("Saving the model and preprocessor...")
     model_path = os.path.join(artifacts_path, "model.pkl")
     preprocessor_path = os.path.join(artifacts_path, "preprocessor.pkl")
-    encoder_path = os.path.join(artifacts_path, "encoder.pkl")
 
     with open(model_path, "wb") as f:
         pickle.dump(model, f)
@@ -747,27 +777,39 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         pickle.dump(preprocessor, f)
 
     if classification:
+        encoder_path = os.path.join(artifacts_path, "encoder.pkl")
         with open(encoder_path, "wb") as f:
             pickle.dump(le, f)
         response = {
-        "message": "Training completed successfully",
+        "Message": "Training completed successfully",
         "Problem_type":"Classification",
-        "model_metrics": {
             "Model": combined_score_ranking.iloc[0]["model"],
             "Train_accuracy": float(combined_score_ranking.iloc[0]["train_accuracy"]),
             "Train_f1": float(combined_score_ranking.iloc[0]["train_f1"]),
+            "Train_precision": float(combined_score_ranking.iloc[0]["train_precision"]),
+            "Train_recall": float(combined_score_ranking.iloc[0]["train_recall"]),
+            "Train_rocauc": float(combined_score_ranking.iloc[0]["train_rocauc"]),
             "Test_accuracy": float(combined_score_ranking.iloc[0]["test_accuracy"]),
             "Test_f1": float(combined_score_ranking.iloc[0]["test_f1"]),
+            "Test_precision": float(combined_score_ranking.iloc[0]["test_precision"]),
+            "Test_recall": float(combined_score_ranking.iloc[0]["test_recall"]),
+            "Test_rocauc": float(combined_score_ranking.iloc[0]["test_rocauc"]),
             "Hyper_tuned": bool(combined_score_ranking.iloc[0]["tuned"]),
             "Dropped_Columns":list(dropcorr)
-        }
     }
-        plot_classification_metrics(model,x_train, y_train, x_test, y_test, class_names=['No', 'Yes'])
+        if(response["Hyper_tuned"]):
+            response["Best_Params"] = best_param_dict
+        print("\n")
+        print("="*55)
+        for key, value in response.items():
+            print(f"{key}: {value}")
+        print("="*55)
+        print("\n")
+        plot_classification_metrics(model,x_train, y_train, x_test, y_test,plot_path=plot_path)
     else:
         response={
-             "message": "Training completed successfully",
-             "Problem_type":"Regression",
-            "model_metrics": {
+            "Message": "Training completed successfully",
+            "Problem_type":"Regression",
             "Model": combined_score_ranking.iloc[0]["model"],
             "Train_R2": float(combined_score_ranking.iloc[0]["train_r2"]),
             "Train_RMSE": float(combined_score_ranking.iloc[0]["train_rmse"]),
@@ -775,20 +817,32 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
             "Test_RMSE": float(combined_score_ranking.iloc[0]["test_rmse"]),
             "Hyper_tuned": bool(combined_score_ranking.iloc[0]["tuned"]),
             "Dropped_Columns":list(dropcorr)
-            }
         }
-        plot_regression_metrics(model, x_train, y_train, x_test, y_test,feature_names)
-    print(response)
+        if(response["Hyper_tuned"]):
+            response["Best_Params"] = best_param_dict
+        print("\n")
+        print("="*55)
+        for i in response:
+            print(f"{i}: {response[i]}")
+        print("="*55)
+        print("\n")
+        plot_regression_metrics(model, x_train, y_train, x_test, y_test,feature_names,plot_path=plot_path)
+    
+    print("artifacts_path:", artifacts_path)
+    print("model_path:", model_path)
+    print("preprocessor_path:", preprocessor_path)
+    if encoder_path:
+        print("encoder_path:", encoder_path)
     return {"status": "success", "model": "trained_model.pkl"}
 
-def plot_classification_metrics(model, X_train, y_train, X_test, y_test, class_names=None):
+def plot_classification_metrics(model, X_train, y_train, X_test, y_test, plot_path,class_names=None):
     # Predict
     y_pred = model.predict(X_test)
     y_proba = model.predict_proba(X_test)[:, 1] if hasattr(model, "predict_proba") else None
-
+    unique_classes = model.classes_
     # Confusion Matrix
     cm = confusion_matrix(y_test, y_pred)
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=class_names)
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=unique_classes)
     disp.plot(cmap="Blues")
     plt.title("Confusion Matrix")
     plt.savefig(os.path.join(plot_path,"confusion_matrix.png"), bbox_inches='tight')
@@ -801,14 +855,15 @@ def plot_classification_metrics(model, X_train, y_train, X_test, y_test, class_n
         plt.savefig(os.path.join(plot_path,"roc_curve.png"), bbox_inches='tight')
         plt.close()
     # Precision-Recall Curve
-    if y_proba is not None:
+    if y_proba is not None and unique_classes.shape[0] == 2:
         precision, recall, _ = precision_recall_curve(y_test, y_proba)
         PrecisionRecallDisplay(precision=precision, recall=recall).plot()
         plt.title("Precision-Recall Curve")
         plt.savefig(os.path.join(plot_path,"precision_recall_curve.png"), bbox_inches='tight')
         plt.close()
     # Learning Curve
-    train_sizes, train_scores, val_scores = learning_curve(model, X_train, y_train, cv=5, scoring='accuracy')
+    cv = min(5, np.min(np.bincount(y_train)))
+    train_sizes, train_scores, val_scores = learning_curve(model, X_train, y_train, cv=cv, scoring='accuracy')
     plt.plot(train_sizes, np.mean(train_scores, axis=1), label="Train")
     plt.plot(train_sizes, np.mean(val_scores, axis=1), label="Validation")
     plt.title("Learning Curve (Accuracy)")
@@ -826,7 +881,10 @@ def plot_classification_metrics(model, X_train, y_train, X_test, y_test, class_n
     ax[1].set_title("Testing Class Distribution")
     plt.savefig(os.path.join(plot_path,"class_distribution.png"), bbox_inches='tight')
     plt.close()
-def plot_regression_metrics(model, X_train, y_train, X_test, y_test,feature_names):
+    
+    
+    
+def plot_regression_metrics(model, X_train, y_train, X_test, y_test,feature_names,plot_path):
     y_pred = model.predict(X_test)
     residuals = y_test - y_pred
 
@@ -867,13 +925,12 @@ def plot_regression_metrics(model, X_train, y_train, X_test, y_test,feature_name
 def main():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", required=True)
-    parser.add_argument("--target", required=True)
-    parser.add_argument("--rmse", required=True)
-    parser.add_argument("--f1", required=True)
+    parser.add_argument("--data_path", required=True)
+    parser.add_argument("--dependent_feature", required=True)
+    parser.add_argument("--rmse_prob", required=True)
+    parser.add_argument("--f1_prob", required=True)
     parser.add_argument("--n_jobs", default=-1, type=int)
     parser.add_argument("--n_iter", default=100, type=int)
     parser.add_argument("--cv", default=3, type=int)
     args = parser.parse_args()
-    print(train_model(args.data, args.target, rmse_prob=args.rmse, f1_prob=args.f1, n_jobs=args.n_jobs, n_iter=args.n_iter, cv=args.cv))
-
+    print(train_model(args.data_path, args.dependent_feature, rmse_prob=args.rmse_prob, f1_prob=args.f1_prob, n_jobs=args.n_jobs, n_iter=args.n_iter, cv=args.cv))
