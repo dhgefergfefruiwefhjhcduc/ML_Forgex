@@ -1,4 +1,4 @@
-# mlforgex
+# mlforgex [![PyPI Downloads](https://static.pepy.tech/badge/mlforgex)](https://pepy.tech/projects/mlforgex)
 
 **mlforgex** is a Python package that enables easy training, evaluation, and prediction for machine learning models on cleaned dataset. It supports both classification and regression problems, automates preprocessing, model selection, hyperparameter tuning, and generates useful artifacts and plots for analysis.
 

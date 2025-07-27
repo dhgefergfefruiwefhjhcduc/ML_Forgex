@@ -5,7 +5,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 setup(
     name="mlforgex",
-    version="1.0.3",
+    version="1.0.4",
     packages=find_packages(),
     install_requires = [
     "pandas",
@@ -28,7 +28,6 @@ setup(
     author="Priyanshu Mathur",
     author_email="mathurpriyanshu2006@gmail.com",
     description="Lightweight ML utility for automated training, evaluation, and prediction with CLI and Python API support",
-    url="https://github.com/yourusername/mlforge",
     license="MIT",
     classifiers=[
          "License :: OSI Approved :: MIT License",

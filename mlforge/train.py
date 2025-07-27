@@ -26,6 +26,21 @@ from sklearn.model_selection import learning_curve
 import warnings
 warnings.filterwarnings("ignore")
 def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=100,cv=3,artifacts_dir=None):
+    """
+    Trains a machine learning model using the provided dataset and parameters.
+
+    Args:
+        data_path (str): Path to the CSV dataset file.
+        dependent_feature (str): The target column (dependent variable) in the dataset.
+        rmse_prob (float): Probability threshold for RMSE (used in regression).
+        f1_prob (float): Probability threshold for F1 score (used in classification).
+        n_jobs (int, optional): Number of parallel jobs to run (-1 uses all CPUs). Default is -1.
+        n_iter (int, optional): Number of iterations for parameter search. Default is 100.
+        cv (int, optional): Number of cross-validation folds. Default is 3.
+
+    Returns:
+        dict: Model evaluation metrics and trained model object.
+    """
     if artifacts_dir:
         artifacts_path = os.path.join(artifacts_dir, "artifacts")
     else:
@@ -775,7 +790,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
 
     with open(preprocessor_path, "wb") as f:
         pickle.dump(preprocessor, f)
-
+    encoder_path = None
     if classification:
         encoder_path = os.path.join(artifacts_path, "encoder.pkl")
         with open(encoder_path, "wb") as f:
@@ -799,12 +814,6 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     }
         if(response["Hyper_tuned"]):
             response["Best_Params"] = best_param_dict
-        print("\n")
-        print("="*55)
-        for key, value in response.items():
-            print(f"{key}: {value}")
-        print("="*55)
-        print("\n")
         plot_classification_metrics(model,x_train, y_train, x_test, y_test,plot_path=plot_path)
     else:
         response={
@@ -820,14 +829,16 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         }
         if(response["Hyper_tuned"]):
             response["Best_Params"] = best_param_dict
-        print("\n")
-        print("="*55)
-        for i in response:
-            print(f"{i}: {response[i]}")
-        print("="*55)
-        print("\n")
         plot_regression_metrics(model, x_train, y_train, x_test, y_test,feature_names,plot_path=plot_path)
-    
+    print("\n")
+    print("="*55)
+    for i in response:
+        print(f"{i}: {response[i]}")
+    print("="*55)
+    print("\n")
+    with open(os.path.join(artifacts_path, "metrices.txt"), "w") as f:
+        for key, value in response.items():
+            f.write(f"{key}: {value}\n")
     print("artifacts_path:", artifacts_path)
     print("model_path:", model_path)
     print("preprocessor_path:", preprocessor_path)
@@ -925,12 +936,12 @@ def plot_regression_metrics(model, X_train, y_train, X_test, y_test,feature_name
 def main():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_path", required=True)
-    parser.add_argument("--dependent_feature", required=True)
-    parser.add_argument("--rmse_prob", required=True)
-    parser.add_argument("--f1_prob", required=True)
-    parser.add_argument("--n_jobs", default=-1, type=int)
-    parser.add_argument("--n_iter", default=100, type=int)
-    parser.add_argument("--cv", default=3, type=int)
+    parser.add_argument("--data_path", required=True,help="Path to the dataset CSV file")
+    parser.add_argument("--dependent_feature", required=True,help="Name of the dependent feature (target variable)")
+    parser.add_argument("--rmse_prob", required=True,help="RMSE probability threshold")
+    parser.add_argument("--f1_prob", required=True,help="F1 score probability threshold")
+    parser.add_argument("--n_jobs", default=-1, type=int,help="Number of jobs to run in parallel")
+    parser.add_argument("--n_iter", default=100, type=int,help="Number of iterations for hyperparameter tuning")
+    parser.add_argument("--cv", default=3, type=int,help="Number of cross-validation folds")
     args = parser.parse_args()
     print(train_model(args.data_path, args.dependent_feature, rmse_prob=args.rmse_prob, f1_prob=args.f1_prob, n_jobs=args.n_jobs, n_iter=args.n_iter, cv=args.cv))
