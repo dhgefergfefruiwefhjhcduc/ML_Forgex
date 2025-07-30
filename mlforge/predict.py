@@ -31,7 +31,7 @@ def predict(model_path,preprocessor_path,input_data, encoder_path=None):
         predictions = model.predict(X)
         if encoder_path:
             predictions = encoder.inverse_transform(predictions)
-        return {"prediction": predictions.tolist()}
+        # return {"prediction": predictions.tolist()}
 def main():
     import argparse
     parser = argparse.ArgumentParser()

@@ -1,3 +1,6 @@
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
 import pickle
 import pandas as pd
 import pickle
@@ -5,9 +8,6 @@ import os
 import numpy as np
 import seaborn as sns
 import matplotlib
-import warnings
-warnings.filterwarnings("ignore", category=UserWarning)
-warnings.filterwarnings("ignore", category=FutureWarning)
 matplotlib.use('Agg')  # Set backend to Agg to prevent GUI window
 import matplotlib.pyplot as plt
 from sklearn.metrics import (
@@ -23,9 +23,8 @@ from sklearn.metrics import (
 )
 from sklearn.inspection import permutation_importance
 from sklearn.model_selection import learning_curve
-import warnings
-warnings.filterwarnings("ignore")
-def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=100,cv=3,artifacts_dir=None):
+
+def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=100,n_splits=5,artifacts_dir=None):
     """
     Trains a machine learning model using the provided dataset and parameters.
 
@@ -36,7 +35,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         f1_prob (float): Probability threshold for F1 score (used in classification).
         n_jobs (int, optional): Number of parallel jobs to run (-1 uses all CPUs). Default is -1.
         n_iter (int, optional): Number of iterations for parameter search. Default is 100.
-        cv (int, optional): Number of cross-validation folds. Default is 3.
+        n_splits (int, optional): Number of splits for cross-validation. Default is 5.
 
     Returns:
         dict: Model evaluation metrics and trained model object.
@@ -81,13 +80,19 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     # print("Dependent Feature:", y)
     regressor=False
     classification=False
+    encode=False
     print("Finding the type of problem...")
     if df[dependent_feature].dtype=="object":
         classification=True
+        encode=True
         print("Classification Problem")
     else:
-        regressor=True
-        print("Regression Problem")
+        if(df[dependent_feature].nunique() < 20):
+            classification=True
+            print("Classification Problem")
+        else:
+            regressor=True
+            print("Regression Problem")
 
     from sklearn.model_selection import train_test_split
     # Splitting the dataset into training and testing sets
@@ -171,7 +176,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     feature_names=list(x_train.columns)
     x_train=preprocessor.fit_transform(x_train)
     x_test=preprocessor.transform(x_test)
-    if classification:
+    if classification and encode:
         le=LabelEncoder()
         y_train=le.fit_transform(y_train)
         y_test=le.transform(y_test)
@@ -276,8 +281,8 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
             # Training set performance
             model_train_accuracy = accuracy_score(y_train, y_train_pred) # Calculate Accuracy
             model_train_f1 = f1_score(y_train, y_train_pred, average=average_type) # Calculate F1-score
-            model_train_precision = precision_score(y_train, y_train_pred, average=average_type) # Calculate Precision
-            model_train_recall = recall_score(y_train, y_train_pred, average=average_type) # Calculate Recall
+            model_train_precision = precision_score(y_train, y_train_pred, average=average_type,zero_division=0) # Calculate Precision
+            model_train_recall = recall_score(y_train, y_train_pred, average=average_type,zero_division=0) # Calculate Recall
             if average_type == "binary":
                 y_train_prob = model.predict_proba(x_train)[:,1]
                 model_train_rocauc_score = roc_auc_score(y_train, y_train_prob)
@@ -287,8 +292,8 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
             # Test set performance
             model_test_accuracy = accuracy_score(y_test, y_test_pred) # Calculate Accuracy
             model_test_f1 = f1_score(y_test, y_test_pred, average=average_type) # Calculate F1-score
-            model_test_precision = precision_score(y_test, y_test_pred, average=average_type) # Calculate Precision
-            model_test_recall = recall_score(y_test, y_test_pred, average=average_type) # Calculate Recall
+            model_test_precision = precision_score(y_test, y_test_pred, average=average_type, zero_division=0) # Calculate Precision
+            model_test_recall = recall_score(y_test, y_test_pred, average=average_type,zero_division=0) # Calculate Recall
             if average_type == "binary":
                 y_test_prob = model.predict_proba(x_test)[:,1]
                 model_test_rocauc_score = roc_auc_score(y_test, y_test_prob)
@@ -300,8 +305,14 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
                 "model":list(models.keys())[i],
                 "train_accuracy": model_train_accuracy,
                 "train_f1": model_train_f1,
+                "train_precision": model_train_precision,
+                "train_recall": model_train_recall,
+                "train_rocauc_score": model_train_rocauc_score,
                 "test_accuracy": model_test_accuracy,
                 "test_f1": model_test_f1,
+                "test_precision": model_test_precision,
+                "test_recall": model_test_recall,
+                "test_rocauc_score": model_test_rocauc_score,
                 "tuned":False
             })
 
@@ -472,12 +483,11 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     if classification:
         class_params = [
             ["LogisticRegression", {
-                'penalty': ['l1', 'l2', 'elasticnet', 'none'],
+                'penalty': ['l2'],               
                 'C': np.logspace(-4, 4, 20),
-                'solver': ['lbfgs', 'liblinear', 'saga'],
+                'solver': ['lbfgs', 'sag', 'saga','newton-cg','newton-cholesky'],
                 'max_iter': [100, 200, 500, 1000],
                 'class_weight': [None, 'balanced'],
-                'l1_ratio': [0, 0.25, 0.5, 0.75, 1]  # For elasticnet
             }],
             
             ["DecisionTreeClassifier", {
@@ -570,6 +580,12 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     from sklearn.model_selection import RandomizedSearchCV
 
     model_param = {}
+    if classification:
+        from sklearn.model_selection import StratifiedKFold
+        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    else:
+        from sklearn.model_selection import KFold
+        cv = KFold(n_splits=n_splits, shuffle=True, random_state=42)
     for name, model, params in randomcv_model:
         random = RandomizedSearchCV(estimator=model,
                                     param_distributions=params,
@@ -684,9 +700,9 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
 
             # Training set performance
             model_train_accuracy = accuracy_score(y_train, y_train_pred) # Calculate Accuracy
-            model_train_f1 = f1_score(y_train, y_train_pred, average=average_type) # Calculate F1-score
-            model_train_precision = precision_score(y_train, y_train_pred,average=average_type) # Calculate Precision
-            model_train_recall = recall_score(y_train, y_train_pred,average=average_type) # Calculate Recall
+            model_train_f1 = f1_score(y_train, y_train_pred, average=average_type,zero_division=0) # Calculate F1-score
+            model_train_precision = precision_score(y_train, y_train_pred,average=average_type,zero_division=0) # Calculate Precision
+            model_train_recall = recall_score(y_train, y_train_pred,average=average_type,zero_division=0) # Calculate Recall
             if average_type == "binary":
                 y_train_prob = model.predict_proba(x_train)[:,1]
                 model_train_rocauc_score = roc_auc_score(y_train, y_train_prob)
@@ -695,9 +711,9 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
                 model_train_rocauc_score = roc_auc_score(y_train, y_train_prob, multi_class='ovr', average=average_type)
             # Test set performance
             model_test_accuracy = accuracy_score(y_test, y_test_pred) # Calculate Accuracy
-            model_test_f1 = f1_score(y_test, y_test_pred, average=average_type) # Calculate F1-score
-            model_test_precision = precision_score(y_test, y_test_pred,average=average_type) # Calculate Precision
-            model_test_recall = recall_score(y_test, y_test_pred,average=average_type) # Calculate Recall
+            model_test_f1 = f1_score(y_test, y_test_pred, average=average_type,zero_division=0) # Calculate F1-score
+            model_test_precision = precision_score(y_test, y_test_pred,average=average_type,zero_division=0) # Calculate Precision
+            model_test_recall = recall_score(y_test, y_test_pred,average=average_type,zero_division=0) # Calculate Recall
             if average_type == "binary":
                 y_test_prob = model.predict_proba(x_test)[:,1]
                 model_test_rocauc_score = roc_auc_score(y_test, y_test_prob)
@@ -710,12 +726,12 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
             "train_f1": model_train_f1,
             "train_precision": model_train_precision,
             "train_recall": model_train_recall,
-            "train_rocauc": model_train_rocauc_score,
+            "train_rocauc_score": model_train_rocauc_score,
             "test_accuracy": model_test_accuracy,
             "test_f1": model_test_f1,
             "test_precision": model_test_precision,
             "test_recall": model_test_recall,
-            "test_rocauc": model_test_rocauc_score,
+            "test_rocauc_score": model_test_rocauc_score,
             "tuned":True
         }
             best_models_copy = pd.concat(
@@ -791,7 +807,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     with open(preprocessor_path, "wb") as f:
         pickle.dump(preprocessor, f)
     encoder_path = None
-    if classification:
+    if classification and encode:
         encoder_path = os.path.join(artifacts_path, "encoder.pkl")
         with open(encoder_path, "wb") as f:
             pickle.dump(le, f)
@@ -803,12 +819,12 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
             "Train_f1": float(combined_score_ranking.iloc[0]["train_f1"]),
             "Train_precision": float(combined_score_ranking.iloc[0]["train_precision"]),
             "Train_recall": float(combined_score_ranking.iloc[0]["train_recall"]),
-            "Train_rocauc": float(combined_score_ranking.iloc[0]["train_rocauc"]),
+            "Train_rocauc": float(combined_score_ranking.iloc[0]["train_rocauc_score"]),
             "Test_accuracy": float(combined_score_ranking.iloc[0]["test_accuracy"]),
             "Test_f1": float(combined_score_ranking.iloc[0]["test_f1"]),
             "Test_precision": float(combined_score_ranking.iloc[0]["test_precision"]),
             "Test_recall": float(combined_score_ranking.iloc[0]["test_recall"]),
-            "Test_rocauc": float(combined_score_ranking.iloc[0]["test_rocauc"]),
+            "Test_rocauc": float(combined_score_ranking.iloc[0]["test_rocauc_score"]),
             "Hyper_tuned": bool(combined_score_ranking.iloc[0]["tuned"]),
             "Dropped_Columns":list(dropcorr)
     }
@@ -836,6 +852,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         print(f"{i}: {response[i]}")
     print("="*55)
     print("\n")
+
     with open(os.path.join(artifacts_path, "metrices.txt"), "w") as f:
         for key, value in response.items():
             f.write(f"{key}: {value}\n")
@@ -844,7 +861,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     print("preprocessor_path:", preprocessor_path)
     if encoder_path:
         print("encoder_path:", encoder_path)
-    return {"status": "success", "model": "trained_model.pkl"}
+    # return {"status": "success", "model": "trained_model.pkl"}
 
 def plot_classification_metrics(model, X_train, y_train, X_test, y_test, plot_path,class_names=None):
     # Predict
@@ -861,9 +878,10 @@ def plot_classification_metrics(model, X_train, y_train, X_test, y_test, plot_pa
     # ROC Curve
     if y_proba is not None and len(np.unique(y_test)) == 2:
         fpr, tpr, _ = roc_curve(y_test, y_proba)
-        RocCurveDisplay(fpr=fpr, tpr=tpr).plot()
+        RocCurveDisplay(fpr=fpr, tpr=tpr).plot(label="ROC Curve")
         plt.title("ROC Curve")
-        plt.savefig(os.path.join(plot_path,"roc_curve.png"), bbox_inches='tight')
+        plt.legend(loc="lower right")   # <-- Add legend manually
+        plt.savefig(os.path.join(plot_path, "roc_curve.png"), bbox_inches='tight')
         plt.close()
     # Precision-Recall Curve
     if y_proba is not None and unique_classes.shape[0] == 2:
@@ -928,20 +946,21 @@ def plot_regression_metrics(model, X_train, y_train, X_test, y_test,feature_name
     plt.title("Learning Curve (R² Score)")
     plt.xlabel("Training Set Size")
     plt.ylabel("R² Score")
-    plt.savefig(os.path.join(plot_path,"r2_score.png"), bbox_inches='tight')
     plt.legend()
+    plt.savefig(os.path.join(plot_path,"r2_score.png"), bbox_inches='tight')
     plt.close()
 
 
-def main():
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--data_path", required=True,help="Path to the dataset CSV file")
-    parser.add_argument("--dependent_feature", required=True,help="Name of the dependent feature (target variable)")
-    parser.add_argument("--rmse_prob", required=True,help="RMSE probability threshold")
-    parser.add_argument("--f1_prob", required=True,help="F1 score probability threshold")
-    parser.add_argument("--n_jobs", default=-1, type=int,help="Number of jobs to run in parallel")
-    parser.add_argument("--n_iter", default=100, type=int,help="Number of iterations for hyperparameter tuning")
-    parser.add_argument("--cv", default=3, type=int,help="Number of cross-validation folds")
-    args = parser.parse_args()
-    print(train_model(args.data_path, args.dependent_feature, rmse_prob=args.rmse_prob, f1_prob=args.f1_prob, n_jobs=args.n_jobs, n_iter=args.n_iter, cv=args.cv))
+# def main():
+#     import argparse
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument("--data_path", required=True,help="Path to the dataset CSV file")
+#     parser.add_argument("--dependent_feature", required=True,help="Name of the dependent feature (target variable)")
+#     parser.add_argument("--rmse_prob", required=True,help="RMSE probability threshold")
+#     parser.add_argument("--f1_prob", required=True,help="F1 score probability threshold")
+#     parser.add_argument("--n_jobs", default=-1, type=int,help="Number of jobs to run in parallel")
+#     parser.add_argument("--n_iter", default=100, type=int,help="Number of iterations for hyperparameter tuning")
+#     parser.add_argument("--n_splits", default=5, type=int,help="Number of splits for cross-validation")
+#     args = parser.parse_args()
+#     print(train_model(args.data_path, args.dependent_feature, rmse_prob=args.rmse_prob, f1_prob=args.f1_prob, n_jobs=args.n_jobs, n_iter=args.n_iter, n_splits=args.n_splits))
+train_model("diabetes_cleaned.csv","Outcome",0.3,0.7)
