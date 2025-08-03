@@ -50,14 +50,17 @@ Or programmatically:
 ```python
 from mlforge import train_model
 
-result = train_model(
+train_model(
     data_path=<data_path>,
     dependent_feature=<dependent_feature>,
     rmse_prob=<rmse_probability>,
     f1_prob=<f1_probability>,
     n_jobs=<n_jobs>
+    n_iter=<n_iter>,
+    n_splits=<n_splits>,
+    artifacts_dir=<artifacts_folder_path>,
+    fast=<train_fast>
 )
-print(result)
 ```
 
 ### Predict

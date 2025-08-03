@@ -5,7 +5,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 setup(
     name="mlforgex",
-    version="1.0.5",
+    version="1.0.10",
     packages=find_packages(),
     install_requires = [
     "pandas",

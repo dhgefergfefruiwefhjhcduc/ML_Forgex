@@ -24,7 +24,7 @@ from sklearn.metrics import (
 from sklearn.inspection import permutation_importance
 from sklearn.model_selection import learning_curve
 
-def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=100,n_splits=5,artifacts_dir=None):
+def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=100,n_splits=5,artifacts_dir=None,fast=False):
     """
     Trains a machine learning model using the provided dataset and parameters.
 
@@ -36,6 +36,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         n_jobs (int, optional): Number of parallel jobs to run (-1 uses all CPUs). Default is -1.
         n_iter (int, optional): Number of iterations for parameter search. Default is 100.
         n_splits (int, optional): Number of splits for cross-validation. Default is 5.
+        fast (bool, optional): Whether to use fast mode for hyperparameter tuning. Default is False.
 
     Returns:
         dict: Model evaluation metrics and trained model object.
@@ -206,6 +207,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         
         for i in range(len(list(models))):
             model = list(models.values())[i]
+            print("-> "+list(models.keys())[i])
             model.fit(x_train, y_train) # Train model
 
             # Make predictions
@@ -230,7 +232,6 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
             "tuned":False
         })
 
-            # print(list(models.keys())[i])
             
             # print('Model performance for Training set')
             # print("- mae: {:.4f}".format(model_train_mae))
@@ -272,6 +273,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     
         for i in range(len(list(models))):
             model = list(models.values())[i]
+            print("-> "+list(models.keys())[i])
             model.fit(x_train, y_train) # Train model
 
             # Make predictions
@@ -317,8 +319,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
             })
 
 
-            # print(list(models.keys())[i])
-            
+
             # print('Model performance for Training set')
             # print("- Accuracy: {:.4f}".format(model_train_accuracy))
             # print('- F1 score: {:.4f}'.format(model_train_f1))
@@ -586,6 +587,8 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     else:
         from sklearn.model_selection import KFold
         cv = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    if fast:
+        n_iter=(int)(n_iter/2)
     for name, model, params in randomcv_model:
         random = RandomizedSearchCV(estimator=model,
                                     param_distributions=params,
@@ -639,6 +642,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     if regressor:
         for i in range(len(list(models))):
             model = list(models.values())[i]
+            print("-> "+list(models.keys())[i])
             model.fit(x_train, y_train) # Train model
             # Make predictions
             y_train_pred = model.predict(x_train)
@@ -654,7 +658,6 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
             model_test_rmse = np.sqrt(model_test_mse)
             model_test_r2 = r2_score(y_test, y_test_pred)
 
-            # print(list(models.keys())[i])
             model_dict={
                 "model":list(models.keys())[i],
                 "train_rmse": model_train_rmse,
@@ -692,6 +695,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     
         for i in range(len(list(models))):
             model = list(models.values())[i]
+            print("-> "+list(models.keys())[i])
             model.fit(x_train, y_train) # Train model
 
             # Make predictions
@@ -720,6 +724,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
             else:
                 y_test_prob=model.predict_proba(x_test)
                 model_test_rocauc_score = roc_auc_score(y_test, y_test_prob, multi_class='ovr', average=average_type)
+            
             model_dict={
             "model":list(models.keys())[i],
             "train_accuracy": model_train_accuracy,
@@ -738,11 +743,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         [best_models_copy, pd.DataFrame([model_dict])],
         ignore_index=True
     )
-            
-
-
-            # print(list(models.keys())[i])
-            
+                        
             # print('Model performance for Training set')
             # print("- Accuracy: {:.4f}".format(model_train_accuracy))
             # print('- F1 score: {:.4f}'.format(model_train_f1))
@@ -951,16 +952,16 @@ def plot_regression_metrics(model, X_train, y_train, X_test, y_test,feature_name
     plt.close()
 
 
-# def main():
-#     import argparse
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument("--data_path", required=True,help="Path to the dataset CSV file")
-#     parser.add_argument("--dependent_feature", required=True,help="Name of the dependent feature (target variable)")
-#     parser.add_argument("--rmse_prob", required=True,help="RMSE probability threshold")
-#     parser.add_argument("--f1_prob", required=True,help="F1 score probability threshold")
-#     parser.add_argument("--n_jobs", default=-1, type=int,help="Number of jobs to run in parallel")
-#     parser.add_argument("--n_iter", default=100, type=int,help="Number of iterations for hyperparameter tuning")
-#     parser.add_argument("--n_splits", default=5, type=int,help="Number of splits for cross-validation")
-#     args = parser.parse_args()
-#     print(train_model(args.data_path, args.dependent_feature, rmse_prob=args.rmse_prob, f1_prob=args.f1_prob, n_jobs=args.n_jobs, n_iter=args.n_iter, n_splits=args.n_splits))
-train_model("diabetes_cleaned.csv","Outcome",0.3,0.7)
+def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_path", required=True,help="Path to the dataset CSV file")
+    parser.add_argument("--dependent_feature", required=True,help="Name of the dependent feature (target variable)")
+    parser.add_argument("--rmse_prob", type=float, required=True,help="RMSE probability threshold")
+    parser.add_argument("--f1_prob",type=float, required=True,help="F1 score probability threshold")
+    parser.add_argument("--n_jobs", default=-1, type=int,help="Number of jobs to run in parallel")
+    parser.add_argument("--n_iter", default=100, type=int,help="Number of iterations for hyperparameter tuning")
+    parser.add_argument("--n_splits", default=5, type=int,help="Number of splits for cross-validation")
+    parser.add_argument("--fast",type=bool, default=False, help="Use fast mode for hyperparameter tuning")
+    args = parser.parse_args()
+    print(train_model(args.data_path, args.dependent_feature, rmse_prob=args.rmse_prob, f1_prob=args.f1_prob, n_jobs=args.n_jobs, n_iter=args.n_iter, n_splits=args.n_splits, fast=args.fast))
