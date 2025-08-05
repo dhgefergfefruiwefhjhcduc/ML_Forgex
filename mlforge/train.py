@@ -1,10 +1,11 @@
+from json import encoder
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 import pickle
 import pandas as pd
-import pickle
 import os
+import tempfile
 import numpy as np
 import seaborn as sns
 import matplotlib
@@ -45,9 +46,12 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         artifacts_path = os.path.join(artifacts_dir, "artifacts")
     else:
         artifacts_path = os.path.join(os.getcwd(), "artifacts")
-    plot_path=os.path.join(artifacts_path,"Plots")
-    os.makedirs(artifacts_path,exist_ok=True)
-    print("Getting data from:",data_path)
+    temp_path=os.path.join(artifacts_path, "temp")
+    os.makedirs(temp_path, exist_ok=True) 
+    tempfile.tempdir= temp_path
+    plot_path = os.path.join(artifacts_path, "Plots")
+    os.makedirs(artifacts_path, exist_ok=True)
+    print("Getting data from:", data_path)
     data=pd.read_csv(data_path)
     df=pd.DataFrame(data)
     # os.remove(data_path)
@@ -107,20 +111,21 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
 
     cat_features=[i for i in x_train.columns if x_train[i].dtype=="object" and i!=dependent_feature]
     num_features=[i for i in x_train.columns if x_train[i].dtype!="object" and i!=dependent_feature]
-    
-    plt.figure(figsize=(12, 8))
-    sns.heatmap(
-        x[num_features].corr(),
-        annot=True,
-        fmt=".2f",
-        cmap="coolwarm",
-        annot_kws={"size": 14}
-    )
-    plt.title("Correlation Heatmap", fontsize=18)
     os.makedirs(plot_path, exist_ok=True)
-    plt.savefig(os.path.join(plot_path,"correlation_heatmap.png"), bbox_inches='tight')
 
-    plt.close()
+    if len(num_features) > 0:
+        plt.figure(figsize=(12, 8))
+        sns.heatmap(
+            x[num_features].corr(),
+            annot=True,
+            fmt=".2f",
+            cmap="coolwarm",
+            annot_kws={"size": 14}
+        )
+        plt.title("Correlation Heatmap", fontsize=18)
+        plt.savefig(os.path.join(plot_path,"correlation_heatmap.png"), bbox_inches='tight')
+
+        plt.close()
     def correlation(dataset,threshold):
         corr_thresh=set()
         for i in range(len(dataset.columns)):
@@ -140,17 +145,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     if classification:
         is_multiclass = len(set(y_train)) > 2
         average_type = "weighted" if is_multiclass else "binary"
-        print("Balancing the dataset...")
-        if mild :
-            from imblearn.under_sampling import RandomUnderSampler
-            undersampler = RandomUnderSampler(random_state=42)
-            x_train, y_train = undersampler.fit_resample(x_train, y_train)
-            print("Mild Imbalance Resolved")
-        if moderate:
-            from imblearn.over_sampling import SMOTETomek
-            smote_tomek = SMOTETomek(random_state=42)
-            x_train, y_train = smote_tomek.fit_resample(x_train, y_train)
-            print("Moderate Imbalace Resolved")
+        
 
 
     
@@ -177,6 +172,18 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     feature_names=list(x_train.columns)
     x_train=preprocessor.fit_transform(x_train)
     x_test=preprocessor.transform(x_test)
+    if classification:
+        print("Balancing the dataset...")
+        if mild :
+            from imblearn.under_sampling import RandomUnderSampler
+            undersampler = RandomUnderSampler(random_state=42)
+            x_train, y_train = undersampler.fit_resample(x_train, y_train)
+            print("Mild Imbalance Resolved")
+        if moderate:
+            from imblearn.combine import SMOTETomek
+            smote_tomek = SMOTETomek(random_state=42)
+            x_train, y_train = smote_tomek.fit_resample(x_train, y_train)
+            print("Moderate Imbalace Resolved")
     if classification and encode:
         le=LabelEncoder()
         y_train=le.fit_transform(y_train)
@@ -207,7 +214,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         
         for i in range(len(list(models))):
             model = list(models.values())[i]
-            print("-> "+list(models.keys())[i])
+            print("-> "+list(models.keys())[i],flush=True)
             model.fit(x_train, y_train) # Train model
 
             # Make predictions
@@ -273,7 +280,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     
         for i in range(len(list(models))):
             model = list(models.values())[i]
-            print("-> "+list(models.keys())[i])
+            print("-> "+list(models.keys())[i],flush=True)
             model.fit(x_train, y_train) # Train model
 
             # Make predictions
@@ -544,7 +551,6 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
                 'reg_lambda': [0, 0.1, 1, 10],
                 'scale_pos_weight': [1, 5, 10],  # For imbalanced classes
                 'random_state': [42],
-                'use_label_encoder': [False],
                 'eval_metric': ['logloss', 'aucpr', 'auc']
             }],
             
@@ -642,7 +648,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     if regressor:
         for i in range(len(list(models))):
             model = list(models.values())[i]
-            print("-> "+list(models.keys())[i])
+            print("-> "+list(models.keys())[i],flush=True)
             model.fit(x_train, y_train) # Train model
             # Make predictions
             y_train_pred = model.predict(x_train)
@@ -695,7 +701,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     
         for i in range(len(list(models))):
             model = list(models.values())[i]
-            print("-> "+list(models.keys())[i])
+            print("-> "+list(models.keys())[i],flush=True)
             model.fit(x_train, y_train) # Train model
 
             # Make predictions
@@ -783,6 +789,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         combined_score_ranking = best_models_copy.sort_values('Combined Score',ascending=False).reset_index(drop=True)
     # print(combined_score_ranking.iloc[0:1,:]["model"][0])
     # print(combined_score_ranking)
+
     if classification:
         combined_score_ranking=combined_score_ranking[combined_score_ranking["train_f1"]-combined_score_ranking["test_f1"]<0.15]
     # print("====="*35)
@@ -808,10 +815,11 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     with open(preprocessor_path, "wb") as f:
         pickle.dump(preprocessor, f)
     encoder_path = None
-    if classification and encode:
-        encoder_path = os.path.join(artifacts_path, "encoder.pkl")
-        with open(encoder_path, "wb") as f:
-            pickle.dump(le, f)
+    if classification:
+        if encode:
+            encoder_path = os.path.join(artifacts_path, "encoder.pkl")
+            with open(encoder_path, "wb") as f:
+                pickle.dump(le, f)
         response = {
         "Message": "Training completed successfully",
         "Problem_type":"Classification",
@@ -862,6 +870,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     print("preprocessor_path:", preprocessor_path)
     if encoder_path:
         print("encoder_path:", encoder_path)
+    os.remove(temp_path)
     # return {"status": "success", "model": "trained_model.pkl"}
 
 def plot_classification_metrics(model, X_train, y_train, X_test, y_test, plot_path,class_names=None):
@@ -965,3 +974,4 @@ def main():
     parser.add_argument("--fast",type=bool, default=False, help="Use fast mode for hyperparameter tuning")
     args = parser.parse_args()
     print(train_model(args.data_path, args.dependent_feature, rmse_prob=args.rmse_prob, f1_prob=args.f1_prob, n_jobs=args.n_jobs, n_iter=args.n_iter, n_splits=args.n_splits, fast=args.fast))
+
