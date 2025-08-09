@@ -35,4 +35,10 @@ setup(
         "Operating System :: OS Independent",
     ],
     python_requires=">=3.8",
+    project_urls={
+        "Homepage": "https://github.com/dhgefergfefruiwefhjhcduc/ML_Forgex",
+        "Documentation": "https://github.com/dhgefergfefruiwefhjhcduc/ML_Forgex/blob/main/README.md",
+        "Source": "https://github.com/dhgefergfefruiwefhjhcduc/ML_Forgex",
+        "Bug Tracker": "https://github.com/dhgefergfefruiwefhjhcduc/ML_Forgex/issues",
+    }
 )

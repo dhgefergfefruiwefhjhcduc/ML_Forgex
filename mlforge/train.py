@@ -6,6 +6,7 @@ import pickle
 import pandas as pd
 import os
 import tempfile
+import shutil
 import numpy as np
 import seaborn as sns
 import matplotlib
@@ -870,7 +871,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     print("preprocessor_path:", preprocessor_path)
     if encoder_path:
         print("encoder_path:", encoder_path)
-    os.remove(temp_path)
+    shutil.rmtree(temp_path)     
     # return {"status": "success", "model": "trained_model.pkl"}
 
 def plot_classification_metrics(model, X_train, y_train, X_test, y_test, plot_path,class_names=None):
