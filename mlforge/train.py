@@ -7,6 +7,7 @@ import pandas as pd
 import os
 import tempfile
 import shutil
+from tqdm import tqdm
 import numpy as np
 import seaborn as sns
 import matplotlib
@@ -107,7 +108,6 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.3, random_state=42,stratify=y)
     else:
         x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.3, random_state=42)
-
     print("Dataset split successfully")
 
     cat_features=[i for i in x_train.columns if x_train[i].dtype=="object" and i!=dependent_feature]
@@ -141,8 +141,6 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     x_test.drop([col for col in dropcorr if col in x_test.columns], axis=1, inplace=True)
     cat_features = [i for i in x_train.columns if x_train[i].dtype == "object" and i != dependent_feature]
     num_features = [i for i in x_train.columns if x_train[i].dtype != "object" and i != dependent_feature]
-    print("Categorical features : ",cat_features)
-    print("Numerical features : ",num_features)
     if classification:
         is_multiclass = len(set(y_train)) > 2
         average_type = "weighted" if is_multiclass else "binary"
@@ -170,9 +168,9 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         ("OrdinalEncoder",oe,oe_data),
         ("StandardScaler",scaler,num_features)]
     )
-    feature_names=list(x_train.columns)
     x_train=preprocessor.fit_transform(x_train)
     x_test=preprocessor.transform(x_test)
+    feature_names=preprocessor.get_feature_names_out()
     if classification:
         print("Balancing the dataset...")
         if mild :
@@ -190,7 +188,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         y_train=le.fit_transform(y_train)
         y_test=le.transform(y_test)
     model_dict=[]
-    print("Training the models...")
+    # print("Training the models...")
     if regressor:
         from sklearn.ensemble import RandomForestRegressor,GradientBoostingRegressor,AdaBoostRegressor
         from sklearn.linear_model import LinearRegression,Ridge, Lasso,ElasticNet
@@ -213,9 +211,9 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
             "SVR":SVR()
         }
         
-        for i in range(len(list(models))):
+        for i in tqdm(range(len(list(models))),desc="Training Models",unit="model"):
             model = list(models.values())[i]
-            print("-> "+list(models.keys())[i],flush=True)
+            # print("-> "+list(models.keys())[i],flush=True)
             model.fit(x_train, y_train) # Train model
 
             # Make predictions
@@ -278,10 +276,10 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         "KNeighborsClassifier":KNeighborsClassifier(),
         "SVC":SVC(probability=True)
     }
-    
-        for i in range(len(list(models))):
+
+        for i in tqdm(range(len(list(models))), desc="Training Models", unit="model"):
             model = list(models.values())[i]
-            print("-> "+list(models.keys())[i],flush=True)
+            # print("-> "+list(models.keys())[i],flush=True)
             model.fit(x_train, y_train) # Train model
 
             # Make predictions
@@ -384,7 +382,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     # print("===="*35)
     top_model=[i  for i in best_models["model"] ]
     print("Top Model:",top_model)
-    print("Training the best models with enhanced parameters...")
+    # print("Training the best models with enhanced parameters...")
     randomcv_model = []
     if regressor:
         reg_params = [
@@ -646,6 +644,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     models={}
     for i in best_params:
         models[i[0]]=model_cls[i[0]](**i[1])
+    print("Training best models with enhanced parameters...")
     if regressor:
         for i in range(len(list(models))):
             model = list(models.values())[i]
@@ -699,7 +698,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
             # print('\n')
 
     if classification:
-    
+
         for i in range(len(list(models))):
             model = list(models.values())[i]
             print("-> "+list(models.keys())[i],flush=True)
@@ -806,7 +805,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     # print("Best Model Parameters:", best_param_dict)
     model.fit(x_train, y_train)
     print("Best Model Trained Successfully")
-    print("Saving the model and preprocessor...")
+    print("Saving the model , preprocessor...")
     model_path = os.path.join(artifacts_path, "model.pkl")
     preprocessor_path = os.path.join(artifacts_path, "preprocessor.pkl")
 
@@ -825,36 +824,42 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         "Message": "Training completed successfully",
         "Problem_type":"Classification",
             "Model": combined_score_ranking.iloc[0]["model"],
-            "Train_accuracy": float(combined_score_ranking.iloc[0]["train_accuracy"]),
-            "Train_f1": float(combined_score_ranking.iloc[0]["train_f1"]),
-            "Train_precision": float(combined_score_ranking.iloc[0]["train_precision"]),
-            "Train_recall": float(combined_score_ranking.iloc[0]["train_recall"]),
-            "Train_rocauc": float(combined_score_ranking.iloc[0]["train_rocauc_score"]),
-            "Test_accuracy": float(combined_score_ranking.iloc[0]["test_accuracy"]),
-            "Test_f1": float(combined_score_ranking.iloc[0]["test_f1"]),
-            "Test_precision": float(combined_score_ranking.iloc[0]["test_precision"]),
-            "Test_recall": float(combined_score_ranking.iloc[0]["test_recall"]),
-            "Test_rocauc": float(combined_score_ranking.iloc[0]["test_rocauc_score"]),
-            "Hyper_tuned": bool(combined_score_ranking.iloc[0]["tuned"]),
-            "Dropped_Columns":list(dropcorr)
+            "Output feature": dependent_feature,
+            "Categorical features": cat_features,
+            "Numerical features": num_features,
+            "Train accuracy": round(float(combined_score_ranking.iloc[0]["train_accuracy"]),4),
+            "Train F1": round(float(combined_score_ranking.iloc[0]["train_f1"]),4),
+            "Train precision": round(float(combined_score_ranking.iloc[0]["train_precision"]),4),
+            "Train recall": round(float(combined_score_ranking.iloc[0]["train_recall"]),4),
+            "Train rocauc": round(float(combined_score_ranking.iloc[0]["train_rocauc_score"]),4),
+            "Test accuracy": round(float(combined_score_ranking.iloc[0]["test_accuracy"]),4),
+            "Test F1": round(float(combined_score_ranking.iloc[0]["test_f1"]),4),
+            "Test precision": round(float(combined_score_ranking.iloc[0]["test_precision"]),4),
+            "Test recall": round(float(combined_score_ranking.iloc[0]["test_recall"]),4),
+            "Test rocauc": round(float(combined_score_ranking.iloc[0]["test_rocauc_score"]),4),
+            "Hyper tuned": bool(combined_score_ranking.iloc[0]["tuned"]),
+            "Dropped Columns":list(dropcorr)
     }
-        if(response["Hyper_tuned"]):
-            response["Best_Params"] = best_param_dict
+        if(response["Hyper tuned"]):
+            response["Best Params"] = best_param_dict
         plot_classification_metrics(model,x_train, y_train, x_test, y_test,plot_path=plot_path)
     else:
         response={
             "Message": "Training completed successfully",
-            "Problem_type":"Regression",
+            "Problem type": "Regression",
             "Model": combined_score_ranking.iloc[0]["model"],
-            "Train_R2": float(combined_score_ranking.iloc[0]["train_r2"]),
-            "Train_RMSE": float(combined_score_ranking.iloc[0]["train_rmse"]),
-            "Test_R2": float(combined_score_ranking.iloc[0]["test_r2"]),
-            "Test_RMSE": float(combined_score_ranking.iloc[0]["test_rmse"]),
-            "Hyper_tuned": bool(combined_score_ranking.iloc[0]["tuned"]),
-            "Dropped_Columns":list(dropcorr)
+            "Output feature": dependent_feature,
+            "Categorical features": cat_features,
+            "Numerical features": num_features,
+            "Train R2": round(float(combined_score_ranking.iloc[0]["train_r2"]),4),
+            "Train RMSE": round(float(combined_score_ranking.iloc[0]["train_rmse"]),4),
+            "Test R2": round(float(combined_score_ranking.iloc[0]["test_r2"]),4),
+            "Test RMSE": round(float(combined_score_ranking.iloc[0]["test_rmse"]),4),
+            "Hyper tuned": bool(combined_score_ranking.iloc[0]["tuned"]),
+            "Dropped Columns":list(dropcorr)
         }
-        if(response["Hyper_tuned"]):
-            response["Best_Params"] = best_param_dict
+        if(response["Hyper tuned"]):
+            response["Best Params"] = best_param_dict
         plot_regression_metrics(model, x_train, y_train, x_test, y_test,feature_names,plot_path=plot_path)
     print("\n")
     print("="*55)
@@ -871,13 +876,15 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     print("preprocessor_path:", preprocessor_path)
     if encoder_path:
         print("encoder_path:", encoder_path)
-    shutil.rmtree(temp_path)     
+    feature_importance(model, plot_path, feature_names)
+    shutil.rmtree(temp_path)
     # return {"status": "success", "model": "trained_model.pkl"}
 
 def plot_classification_metrics(model, X_train, y_train, X_test, y_test, plot_path,class_names=None):
     # Predict
     y_pred = model.predict(X_test)
     y_proba = model.predict_proba(X_test)[:, 1] if hasattr(model, "predict_proba") else None
+  
     unique_classes = model.classes_
     # Confusion Matrix
     cm = confusion_matrix(y_test, y_pred)
@@ -927,7 +934,6 @@ def plot_classification_metrics(model, X_train, y_train, X_test, y_test, plot_pa
 def plot_regression_metrics(model, X_train, y_train, X_test, y_test,feature_names,plot_path):
     y_pred = model.predict(X_test)
     residuals = y_test - y_pred
-
     # Actual vs. Predicted
     plt.scatter(y_test, y_pred, alpha=0.7)
     plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], '--r')
@@ -960,7 +966,45 @@ def plot_regression_metrics(model, X_train, y_train, X_test, y_test,feature_name
     plt.legend()
     plt.savefig(os.path.join(plot_path,"r2_score.png"), bbox_inches='tight')
     plt.close()
+def feature_importance(model, plot_path, feature_names):
+    if hasattr(model, 'feature_importances_'):
+        importances = model.feature_importances_
+        # Clean feature names (remove 'StandardScaler__' prefix if present)
+        feature_clean_name=[]
+        for i in feature_names:
+            if i.split("__")[0] == "StandardScaler" or i.split("__")[0]=="OrdinalEncoder" :
+                feature_clean_name.append(i.split("__")[1])
+            elif (i.split("__")[0]=="OneHotEncoder" ):
+                category,value=i.split("__")[1].rsplit("_",1)
+                feature_clean_name.append(f"{category} : {value}")
+            else:
+                feature_clean_name.append(i)
 
+        # Convert to percentages and sort
+        importances = 100 * (importances / importances.sum())  # Convert to percentage of max importance
+        indices = np.argsort(importances)[::-1]  # Sort in descending order
+
+        # Plot
+        plt.figure(figsize=(8, max(4, len(importances) * 0.4)))
+        bars = plt.barh(range(len(importances)), importances[indices], align='center', color="skyblue")
+        
+        # Add percentage labels on each bar
+        for bar in bars:
+            width = bar.get_width()
+            plt.text(width + 0.5,  # x-position (just right of the bar)
+                    bar.get_y() + bar.get_height()/2,  # y-position (center of bar)
+                    f'{width:.1f}%',  # text
+                    va='center')  # vertical alignment
+        
+        plt.yticks(range(len(importances)), [feature_clean_name[i] for i in indices])
+        plt.gca().invert_yaxis()  # Highest importance at top
+        plt.xlabel("Global Importance (%)")
+        plt.title("Feature Importances")
+        plt.xlim(0, 110)  # Leave room for percentage labels
+        
+        os.makedirs(plot_path, exist_ok=True)
+        plt.savefig(os.path.join(plot_path, "feature_importances.png"), bbox_inches='tight')
+        plt.close()
 
 def main():
     import argparse
