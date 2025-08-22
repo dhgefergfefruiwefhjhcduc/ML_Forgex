@@ -1,7 +1,9 @@
 from json import encoder
 import warnings
+from sklearn.exceptions import FitFailedWarning
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=FitFailedWarning)
 import pickle
 import pandas as pd
 import os
@@ -27,27 +29,92 @@ from sklearn.metrics import (
 from sklearn.inspection import permutation_importance
 from sklearn.model_selection import learning_curve
 
-def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=100,n_splits=5,artifacts_dir=None,fast=False):
+def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=100,n_splits=5,artifacts_dir=None,artifacts_name="artifacts",fast=False,corr_threshold=0.85,skew_threshold=1,z_threshold=3,overfit_threshold=0.15):
     """
-    Trains a machine learning model using the provided dataset and parameters.
+Trains and evaluates a machine learning model using the provided dataset, 
+with automated preprocessing, feature selection, hyperparameter tuning, 
+and overfitting detection.
 
-    Args:
-        data_path (str): Path to the CSV dataset file.
-        dependent_feature (str): The target column (dependent variable) in the dataset.
-        rmse_prob (float): Probability threshold for RMSE (used in regression).
-        f1_prob (float): Probability threshold for F1 score (used in classification).
-        n_jobs (int, optional): Number of parallel jobs to run (-1 uses all CPUs). Default is -1.
-        n_iter (int, optional): Number of iterations for parameter search. Default is 100.
-        n_splits (int, optional): Number of splits for cross-validation. Default is 5.
-        fast (bool, optional): Whether to use fast mode for hyperparameter tuning. Default is False.
+Args:
+    data_path (str):
+        Path to the CSV dataset file. The dataset must contain the dependent
+        variable (target) along with all the input features.
 
-    Returns:
-        dict: Model evaluation metrics and trained model object.
+    dependent_feature (str):
+        The name of the target column (dependent variable) in the dataset.
+        This is the value the model will learn to predict.
+
+    rmse_prob (float):
+        Probability threshold for RMSE evaluation (used in regression problems).
+        Helps in deciding acceptable error levels for regression models.
+
+    f1_prob (float):
+        Probability threshold for F1-score evaluation (used in classification problems).
+        Helps in assessing classification performance, especially for imbalanced datasets.
+
+    n_jobs (int, optional):
+        Number of parallel jobs to run during model training and evaluation.
+        -1 means using all available CPUs. Default is -1.
+
+    n_iter (int, optional):
+        Number of iterations for randomized hyperparameter search. 
+        Higher values increase accuracy but require more computation time.
+        Default is 100.
+
+    n_splits (int, optional):
+        Number of folds for cross-validation. 
+        Determines how the dataset is split during validation.
+        Default is 5.
+
+    fast (bool, optional):
+        If True, uses a faster but less exhaustive hyperparameter tuning approach
+        for quicker results. If False, performs a more thorough search. 
+        Default is False.
+
+    artifacts_dir (str, optional):
+        Directory to save training artifacts such as models, plots, and logs.
+        If None, the current working directory is used.
+        Default is None.
+
+    artifacts_name (str, optional):
+        Name of the artifacts directory (inside artifacts_dir).
+        Useful for organizing multiple training runs.
+        Default is "artifacts".
+
+    corr_threshold (float, optional):
+        Maximum correlation threshold for feature selection.
+        Features with correlations higher than this value (highly collinear features) may be dropped.
+        Default is 0.85.
+
+    skew_threshold (float, optional):
+        Threshold for handling skewness in numerical features.
+        Features with skewness beyond this value may be transformed to reduce skewness.
+        Default is 1.
+
+    z_threshold (float, optional):
+        Z-score threshold for outlier removal. 
+        Data points with Z-scores beyond this threshold are considered outliers and may be removed.
+        Default is 3.
+
+    overfit_threshold (float, optional):
+        Specifies the maximum acceptable gap between the training F1-score 
+        and the testing F1-score. If the difference between them exceeds this threshold,
+        the model is flagged as overfitting.
+        - A smaller value (e.g., 0.05) makes overfitting detection stricter.
+        - A larger value (e.g., 0.3) allows more tolerance.
+        Default is 0.15.
+
+Returns:
+    dict:
+        A dictionary containing:
+            - Model evaluation metrics (e.g., accuracy, F1-score, RMSE).
+            - The trained model object.
     """
+
     if artifacts_dir:
-        artifacts_path = os.path.join(artifacts_dir, "artifacts")
+        artifacts_path = os.path.join(artifacts_dir, artifacts_name)
     else:
-        artifacts_path = os.path.join(os.getcwd(), "artifacts")
+        artifacts_path = os.path.join(os.getcwd(), artifacts_name)
     temp_path=os.path.join(artifacts_path, "temp")
     os.makedirs(temp_path, exist_ok=True) 
     tempfile.tempdir= temp_path
@@ -59,13 +126,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     # os.remove(data_path)
     df.head()
     print("Data loaded successfully")
-    df.replace(["", "NA", "na", "N/A", "n/a", "?", "--"], np.nan, inplace=True)
-    for i in df.columns:
-        if df[i].dtype=="object":
-            df[i] = df[i].fillna(df[i].mode()[0])
-        else:
-            df[i] = df[i].fillna(df[i].median())
-    df.drop_duplicates(inplace=True, ignore_index=True)
+    df=data_cleaning(df,skew_threshold,z_threshold)
     mild=False
     moderate=False
     majority=max(df[dependent_feature].value_counts())
@@ -81,6 +142,10 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
 
     # feature selection
     # Replace < Dependent feture > and < Independent feature > with actual column names
+    corr_thresh=set()
+    dropcorr=set()
+    dropcorr.update([i for i in df.columns if df[i].nunique() == 1])
+    df=df.drop(columns=dropcorr, axis=1)
     x=df.drop(columns=[dependent_feature])
     y=df[dependent_feature]
     # print("Independent Feature:", x)
@@ -100,7 +165,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         else:
             regressor=True
             print("Regression Problem")
-
+    corr_thresh.update([i for i in df.columns if df[i].nunique() == 1])
     from sklearn.model_selection import train_test_split
     # Splitting the dataset into training and testing sets
     print("Splitting the dataset into training and testing sets...")
@@ -113,7 +178,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     cat_features=[i for i in x_train.columns if x_train[i].dtype=="object" and i!=dependent_feature]
     num_features=[i for i in x_train.columns if x_train[i].dtype!="object" and i!=dependent_feature]
     os.makedirs(plot_path, exist_ok=True)
-
+    
     if len(num_features) > 0:
         plt.figure(figsize=(12, 8))
         sns.heatmap(
@@ -125,29 +190,27 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         )
         plt.title("Correlation Heatmap", fontsize=18)
         plt.savefig(os.path.join(plot_path,"correlation_heatmap.png"), bbox_inches='tight')
-
         plt.close()
-    def correlation(dataset,threshold):
-        corr_thresh=set()
+    def correlation(df,dataset,target,max_threshold):
+        dataset=dataset.copy()
+        corr_matrix=dataset.corr()
         for i in range(len(dataset.columns)):
             for j in range(i):
-                colname=dataset.columns[i]
-                if abs(dataset.corr().iloc[i,j])>threshold :
+                colname = corr_matrix.columns[i]
+                corr_value = abs(corr_matrix.iloc[i, j])
+                if corr_value > max_threshold :
                     corr_thresh.add(colname)
-        return corr_thresh
 
-    dropcorr = correlation(x_train[num_features], 0.85)
-    x_train.drop([col for col in dropcorr if col in x_train.columns], axis=1, inplace=True)
-    x_test.drop([col for col in dropcorr if col in x_test.columns], axis=1, inplace=True)
+        return corr_thresh
+    dropcorr.update(correlation(df,x_train[num_features],dependent_feature,corr_threshold))
+    x_train.drop([col for col in corr_thresh if col in x_train.columns], axis=1, inplace=True)
+    x_test.drop([col for col in corr_thresh if col in x_test.columns], axis=1, inplace=True)
     cat_features = [i for i in x_train.columns if x_train[i].dtype == "object" and i != dependent_feature]
     num_features = [i for i in x_train.columns if x_train[i].dtype != "object" and i != dependent_feature]
     if classification:
         is_multiclass = len(set(y_train)) > 2
         average_type = "weighted" if is_multiclass else "binary"
         
-
-
-    
     print("Preprocessing the data...")  
     from sklearn.preprocessing import StandardScaler, OneHotEncoder,OrdinalEncoder,LabelEncoder
     from sklearn.compose import ColumnTransformer
@@ -371,7 +434,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         comparison_df['Norm Accuracy'] = comparison_df["total_accuracy"] / comparison_df['total_accuracy'].max()
         comparison_df['Combined Score'] = f1_prob * comparison_df['Norm F1'] + (1-f1_prob)* comparison_df['Norm Accuracy']
         combined_score_ranking = comparison_df.sort_values('Combined Score',ascending=False)
-        combined_score_ranking=combined_score_ranking[combined_score_ranking["train_f1"]-combined_score_ranking["test_f1"]<0.15]
+        combined_score_ranking=combined_score_ranking[combined_score_ranking["train_f1"]-combined_score_ranking["test_f1"]<overfit_threshold]
         # print(combined_score_ranking[["model","train_accuracy", "train_f1", "test_accuracy", "test_f1","total_accuracy","total_f1","Combined Score"]])
         # print("===="*35)
         best_models = combined_score_ranking.nlargest(3, 'Combined Score')
@@ -381,6 +444,9 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     # print(best_models)
     # print("===="*35)
     top_model=[i  for i in best_models["model"] ]
+    if(len(top_model)==0):
+        print("No suitable models found after filtering. Please check your data, model configuration, or relax the overfitting threshold.")
+        return
     print("Top Model:",top_model)
     # print("Training the best models with enhanced parameters...")
     randomcv_model = []
@@ -594,7 +660,8 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         cv = KFold(n_splits=n_splits, shuffle=True, random_state=42)
     if fast:
         n_iter=(int)(n_iter/2)
-    for name, model, params in randomcv_model:
+    for name, model, params in tqdm(randomcv_model, desc="Training best models with enhanced parameters ", unit="model",leave=True,
+    dynamic_ncols=True):
         random = RandomizedSearchCV(estimator=model,
                                     param_distributions=params,
                                     n_iter=n_iter,
@@ -644,11 +711,11 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     models={}
     for i in best_params:
         models[i[0]]=model_cls[i[0]](**i[1])
-    print("Training best models with enhanced parameters...")
+    # print("Training best models with enhanced parameters...")
     if regressor:
         for i in range(len(list(models))):
             model = list(models.values())[i]
-            print("-> "+list(models.keys())[i],flush=True)
+            # print("-> "+list(models.keys())[i],flush=True)
             model.fit(x_train, y_train) # Train model
             # Make predictions
             y_train_pred = model.predict(x_train)
@@ -701,7 +768,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
 
         for i in range(len(list(models))):
             model = list(models.values())[i]
-            print("-> "+list(models.keys())[i],flush=True)
+            # print("-> "+list(models.keys())[i],flush=True)
             model.fit(x_train, y_train) # Train model
 
             # Make predictions
@@ -791,7 +858,7 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     # print(combined_score_ranking)
 
     if classification:
-        combined_score_ranking=combined_score_ranking[combined_score_ranking["train_f1"]-combined_score_ranking["test_f1"]<0.15]
+        combined_score_ranking=combined_score_ranking[combined_score_ranking["train_f1"]-combined_score_ranking["test_f1"]<overfit_threshold]
     # print("====="*35)
     # print(combined_score_ranking.iloc[0:1,:])
     best_model_name = combined_score_ranking.iloc[0]["model"]
@@ -804,13 +871,16 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     # print("Best Model Name:", best_model_name)
     # print("Best Model Parameters:", best_param_dict)
     model.fit(x_train, y_train)
-    print("Best Model Trained Successfully")
+    # print("Best Model Trained Successfully")
     print("Saving the model , preprocessor...")
     model_path = os.path.join(artifacts_path, "model.pkl")
     preprocessor_path = os.path.join(artifacts_path, "preprocessor.pkl")
-
+    to_save={
+        "model":model,
+        "dependent_feature":dependent_feature
+    }
     with open(model_path, "wb") as f:
-        pickle.dump(model, f)
+        pickle.dump(to_save, f)
 
     with open(preprocessor_path, "wb") as f:
         pickle.dump(preprocessor, f)
@@ -867,10 +937,30 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
         print(f"{i}: {response[i]}")
     print("="*55)
     print("\n")
-
+    arguments = {
+        "data_path": data_path,
+        "dependent_feature": dependent_feature,
+        "rmse_prob": rmse_prob,
+        "f1_prob": f1_prob,
+        "n_jobs": n_jobs,
+        "n_iter": n_iter,
+        "n_splits": n_splits,
+        "fast": fast,
+        "artifacts_dir": artifacts_dir,
+        "artifacts_name": artifacts_name,
+        "corr_threshold": corr_threshold,
+        "skew_threshold": skew_threshold,
+        "z_threshold": z_threshold,
+        "overfit_threshold": overfit_threshold,
+    }
     with open(os.path.join(artifacts_path, "metrices.txt"), "w") as f:
         for key, value in response.items():
             f.write(f"{key}: {value}\n")
+        f.write("\n\n\n")
+        f.write("Arguments used :- \n")
+        for key,value in arguments.items():
+            f.write(f"{key}: {value}\n")
+
     print("artifacts_path:", artifacts_path)
     print("model_path:", model_path)
     print("preprocessor_path:", preprocessor_path)
@@ -879,6 +969,8 @@ def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=
     feature_importance(model, plot_path, feature_names)
     shutil.rmtree(temp_path)
     # return {"status": "success", "model": "trained_model.pkl"}
+
+
 
 def plot_classification_metrics(model, X_train, y_train, X_test, y_test, plot_path,class_names=None):
     # Predict
@@ -931,6 +1023,7 @@ def plot_classification_metrics(model, X_train, y_train, X_test, y_test, plot_pa
     
     
     
+
 def plot_regression_metrics(model, X_train, y_train, X_test, y_test,feature_names,plot_path):
     y_pred = model.predict(X_test)
     residuals = y_test - y_pred
@@ -966,6 +1059,10 @@ def plot_regression_metrics(model, X_train, y_train, X_test, y_test,feature_name
     plt.legend()
     plt.savefig(os.path.join(plot_path,"r2_score.png"), bbox_inches='tight')
     plt.close()
+
+
+
+
 def feature_importance(model, plot_path, feature_names):
     if hasattr(model, 'feature_importances_'):
         importances = model.feature_importances_
@@ -982,7 +1079,7 @@ def feature_importance(model, plot_path, feature_names):
 
         # Convert to percentages and sort
         importances = 100 * (importances / importances.sum())  # Convert to percentage of max importance
-        indices = np.argsort(importances)[::-1]  # Sort in descending order
+        indices = np.argsort(importances)[ : :-1]  # Sort in descending order
 
         # Plot
         plt.figure(figsize=(8, max(4, len(importances) * 0.4)))
@@ -1006,17 +1103,80 @@ def feature_importance(model, plot_path, feature_names):
         plt.savefig(os.path.join(plot_path, "feature_importances.png"), bbox_inches='tight')
         plt.close()
 
+
+
+def data_cleaning(df, skew_thres, z_thres):
+    df.replace(["", "NA", "na", "N/A", "n/a", "?", "--", "-"], np.nan, inplace=True)
+    for col in df.columns:
+        if df[col].dtype == "object" or df[col].dtype.name == "category":
+            if not df[col].mode().empty:
+                df[col].fillna(df[col].mode()[0], inplace=True)
+        else:
+            df[col].fillna(df[col].median(), inplace=True)
+    df.drop_duplicates(inplace=True, ignore_index=True)
+    df = remove_outlier(df, skew_thres, z_thres)
+    return df
+
+
+def remove_outlier(df, skew_thres, z_thresh):
+    from scipy import stats
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+
+    for col in numeric_cols:
+        if df[col].nunique(dropna=True) <= 1:  
+            continue
+
+        if abs(df[col].skew(skipna=True)) > skew_thres:
+            Q1 = df[col].quantile(0.25)
+            Q3 = df[col].quantile(0.75)
+            IQR = Q3 - Q1
+            lower_bound = Q1 - 1.5 * IQR
+            upper_bound = Q3 + 1.5 * IQR
+            mask = ((df[col] >= lower_bound) & (df[col] <= upper_bound)) | df[col].isna()
+            df = df[mask]
+        else:
+            z_score = stats.zscore(df[col], nan_policy='omit')
+            mask = (np.abs(z_score) <= z_thresh) | df[col].isna()
+            df = df[mask]
+
+    return df.reset_index(drop=True)
+
 def main():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_path", required=True,help="Path to the dataset CSV file")
-    parser.add_argument("--dependent_feature", required=True,help="Name of the dependent feature (target variable)")
-    parser.add_argument("--rmse_prob", type=float, required=True,help="RMSE probability threshold")
-    parser.add_argument("--f1_prob",type=float, required=True,help="F1 score probability threshold")
-    parser.add_argument("--n_jobs", default=-1, type=int,help="Number of jobs to run in parallel")
-    parser.add_argument("--n_iter", default=100, type=int,help="Number of iterations for hyperparameter tuning")
-    parser.add_argument("--n_splits", default=5, type=int,help="Number of splits for cross-validation")
-    parser.add_argument("--fast",type=bool, default=False, help="Use fast mode for hyperparameter tuning")
+    parser.add_argument("--data_path", required=True, help="Path to the dataset CSV file")
+    parser.add_argument("--dependent_feature", required=True, help="Name of the dependent feature (target variable)")
+    parser.add_argument("--rmse_prob", type=float, required=True, help="RMSE probability threshold")
+    parser.add_argument("--f1_prob", type=float, required=True, help="F1 score probability threshold")
+    parser.add_argument("--n_jobs", default=-1, type=int, help="Number of jobs to run in parallel")
+    parser.add_argument("--n_iter", default=100, type=int, help="Number of iterations for hyperparameter tuning")
+    parser.add_argument("--n_splits", default=5, type=int, help="Number of splits for cross-validation")
+    parser.add_argument("--no_fast", action="store_false", default=False,help="Disable fast mode for hyperparameter tuning")
+    parser.add_argument("--fast", action="store_true", dest="no_fast",help="Enable fast mode for hyperparameter tuning")
+    parser.add_argument("--artifacts_dir", default=None, help="Path to save the artifacts")
+    parser.add_argument("--artifacts_name", default="artifacts", help="Name of the artifacts directory")
+    parser.add_argument("--corr_threshold", type=float, default=0.85, help="Maximum threshold for feature selection")
+    parser.add_argument("--skew_threshold", type=float, default=1.0, help="Skewness threshold for feature selection")
+    parser.add_argument("--z_threshold", type=float, default=3.0, help="Z-score threshold for outlier removal")
+    parser.add_argument("--overfit_threshold", type=float, default=0.15, 
+                        help="If the difference between training and test F1 score exceeds this value, "
+                             "the model is flagged as overfitting")
+
     args = parser.parse_args()
-    print(train_model(args.data_path, args.dependent_feature, rmse_prob=args.rmse_prob, f1_prob=args.f1_prob, n_jobs=args.n_jobs, n_iter=args.n_iter, n_splits=args.n_splits, fast=args.fast))
+
+    train_model(
+        data_path=args.data_path,
+        dependent_feature=args.dependent_feature,
+        rmse_prob=args.rmse_prob,
+        f1_prob=args.f1_prob,
+        n_jobs=args.n_jobs,
+        n_iter=args.n_iter,
+        n_splits=args.n_splits,
+        fast=args.fast,
+        artifacts_dir=args.artifacts_dir,   
+        artifacts_name=args.artifacts_name,
+        corr_threshold=args.corr_threshold,
+        skew_threshold=args.skew_threshold,
+        z_threshold=args.z_threshold,
+        overfit_threshold=args.overfit_threshold )
 

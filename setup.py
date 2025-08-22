@@ -5,7 +5,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text(encoding="utf-8")
 setup(
     name="mlforgex",
-    version="1.0.12",
+    version="1.0.13",
     packages=find_packages(),
     install_requires = [
     "pandas",
@@ -14,7 +14,10 @@ setup(
     "matplotlib",
     "scikit-learn",
     "xgboost",
-    "imbalanced-learn"
+    "imbalanced-learn",
+    "tqdm",
+    "scipy",
+    "requests"
 ]
 ,
     long_description=long_description,
