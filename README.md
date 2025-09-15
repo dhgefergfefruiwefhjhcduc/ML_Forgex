@@ -3,7 +3,7 @@
 
 **mlforgex** is an **end-to-end machine learning automation package** for Python.
 It allows you to **train, evaluate, and make predictions** with minimal effort — handling **data preprocessing**, **model selection**, **hyperparameter tuning**, and **artifact generation** automatically.
-It supports **both classification and regression** problems and ships with sensible defaults to get you started quickly while providing advanced options for production workflows.
+It supports **Classification , Regression and NLP** problems and ships with sensible defaults to get you started quickly while providing advanced options for production workflows.
 
 ---
 ## Table of contents
@@ -82,6 +82,7 @@ mlforge-train \
   --cv 3 \
   --artifacts_dir artifacts
 # add --fast to speed up the run
+# add --nlp to enable NLP mode
 ```
 
 After training, run prediction on new rows:
@@ -93,12 +94,13 @@ mlforge-predict \
   --input_data path/to/new_data.csv \
   --encoder_path artifacts/encoder.pkl  # only for classification
 # add --no-predicted_data to disable saving predicted data 
+# add --nlp to enable NLP mode 
 ```
 
 ## Python API quickstart
 
 ```python
-from mlforgex import train_model, predict
+from mlforge import train_model, predict
 
 train_model(
     data_path="data.csv",
@@ -109,14 +111,16 @@ train_model(
     n_iter=100,
     cv=3,
     artifacts_dir="artifacts",
-    fast=False       # set True to skip tuning and go faster
+    fast=False ,      # set True to skip tuning and go faster
+    nlp=False        # set True to enable NLP mode
 )
 
 preds = predict(
     model_path="artifacts/model.pkl",
     preprocessor_path="artifacts/preprocessor.pkl",
     input_data_path="new_data.csv",
-    encoder_path="artifacts/encoder.pkl"  # optional
+    encoder_path="artifacts/encoder.pkl" , # optional
+    nlp=False  # set True to enable NLP mode 
 )
 print(preds[:10])
 ```
@@ -164,9 +168,10 @@ This section explains each major feature and what it does, so users understand w
 - Saves these artifacts to `artifacts_dir`:
   - `model.pkl` — best performing, serialized model
   - `preprocessor.pkl` — fitted preprocessing pipeline (encoders, scalers)
-  - `encoder.pkl` — label/target encoder (classification only)
-  - `metrics.txt` — train/test metrics
-  - `Plots/` — saved PNGs of the generated visualizations
+  - `word2vec.model` — saved Gensim Word2Vec model (created when `--nlp` with Word2Vec). Load this to vectorize new text without retraining.
+  - `encoder.pkl` — label/target encoder (classification only) — mapping persisted so predictions can be decoded to original labels
+  - `metrics.txt` — train/test metrics, CV results and run configuration (arguments used)
+  - `Plots/` — directory of generated visualizations (PNG). Typical files:
 
 ## Visualizations & Reporting
 - Automatically generates and saves:
@@ -177,6 +182,7 @@ This section explains each major feature and what it does, so users understand w
   - Learning curve (train vs validation)
   - Feature importance bar chart
   - Residual plots 
+  - wordcloud
 
 
 ---
@@ -195,7 +201,8 @@ mlforge-train \
   [--cv <int>] \
   [--artifacts_dir <path>] \
   [--artifacts_name <name>] \
-  [--fast]
+  [--fast]\
+  [--nlp]
 ```
 
 | Flag | Type | Default | Explanation |
@@ -210,10 +217,12 @@ mlforge-train \
 | `--artifacts_dir` | str | None | Directory where artifacts, metrics, and plots will be saved. |
 | `--artifacts_name` | str | artifacts | Name of the artifacts directory. |
 | `--fast` | flag | False | **Enable fast mode**. This is a boolean flag — include it to enable. When enabled: skips hyperparameter tuning and uses strong defaults for models to produce results much faster. Example usage: `--fast`. |
+| `--nlp` | flag | False | Enable NLP mode. When provided, the trainer runs the text pipeline: uses an existing `text` column (or combines object cols), performs tokenization, stopword removal (keeps negations), lemmatization, vectorizes text (Word2Vec), enforces label encoding for classification, and saves NLP artifacts (word2vec/preprocessor). Example: `--nlp`. |
 
 **Important notes**:
 - `--fast` is a flag; do not pass `True`/`False` as value. Use `--fast` to enable fast mode, omit it to run in full mode.
 - `rmse_prob` and `f1_prob` act as relative weights. Only the appropriate one is used for the detected task type (the other is ignored).
+- `--nlp` is a flag; do not pass `True`/`False` as value. Use `--nlp` to enable NLP mode, omit it to run in Normal mode.
 
 ### Predict command
 ```bash
@@ -222,6 +231,7 @@ mlforge-predict \
   --preprocessor_path <preprocessor.pkl> \
   --input_data <input.csv> \
   --encoder_path <encoder.pkl> 
+
 ```
 
 | Flag | Type | Default | Explanation |
@@ -231,11 +241,15 @@ mlforge-predict \
 | `--input_data` | str | — | CSV file with rows to predict (same feature columns except target). |
 | `--encoder_path` | str | — | Path to the encoder pickle (classification only). If not provided for classification, predictions will be returned as encoded values. |
 | `--predicted_data` | flag | True | Saves the input data with prediction column. |
+| `--nlp` | flag | False | Enable NLP/text-mode for prediction. When provided, the predictor will combine object/text columns (or use an existing `text` column), apply the same text preprocessing used at training, load the text preprocessor / Word2Vec model from `--preprocessor_path`, vectorize inputs (average word‑vectors on the saved preprocessor), and decode labels with `--encoder_path` if supplied. Use `--nlp` to enable. |
+
 
 ---
 
 **Important notes**:
 - `--predicted_data` is a flag; do not pass `True`/`False` as value. Use `--no-predicted_data` to disable saving predicted data.
+- `--nlp` is a flag; do not pass `True`/`False` as value. Use `--nlp` to enable NLP mode.
+- If using NLP mode (`--nlp`), set `--preprocessor_path` to the saved word2vec model. 
 
 
 
@@ -247,8 +261,9 @@ After a training run, the `artifacts_dir` contains:
 artifacts/
 ├─ model.pkl                 # Serialized best model
 ├─ preprocessor.pkl          # Fitted preprocessing pipeline
+├─ word2vec.model            # word2vec model (NLP)
 ├─ encoder.pkl               # Label encoder (classification)
-├─ metrics.txt             # Text file with train/test metrics & CV results
+├─ metrics.txt               # Text file with train/test metrics & CV results
 └─ Plots/
    ├─ correlation_heatmap.png
    ├─ confusion_matrix.png
@@ -257,6 +272,7 @@ artifacts/
    ├─ learning_curve.png
    ├─ feature_importance.png
    └─ residuals.png
+   └─ wordcloud.png  # NLP mode
 ```
 
 The `metrics.txt` contains entries such as:
@@ -304,7 +320,7 @@ overfit_threshold: 0.15
 3. **Preprocessing**: Missing value imputation, encoding, scaling, duplicate/outlier removal.
 4. **Imbalance handling**: If classification and imbalance detected, apply resampling on training folds.
 5. **Candidate model training**: Train a curated set of models appropriate for the detected task.
-6. **(Optional) tuning**: Use randomized/grid search to tune hyperparameters (skipped in `--fast`). Tuning runs inside CV to avoid leak.
+6. **Tuning**: Use randomizedsearch to tune hyperparameters (skipped some iters in `--fast`). Tuning runs inside CV to avoid leak.
 7. **Model selection**: Rank models by composite score derived from `f1_prob`/`rmse_prob` and pick the best.
 8. **Save artifacts & report**: Store model, pipeline, metrics, plots, and run config for reproducibility.
 
@@ -319,7 +335,7 @@ mlforge-train --data_path housing.csv --dependent_feature SalePrice --cv 5 --n_i
 
 ## Predicting from Python
 ```python
-from mlforgex import predict
+from mlforge import predict
 preds = predict("artifacts/model.pkl", "artifacts/preprocessor.pkl", "new_rows.csv", encoder_path=None)
 print(preds.head())
 ```

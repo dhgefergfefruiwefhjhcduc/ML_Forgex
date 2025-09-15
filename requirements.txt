@@ -8,3 +8,6 @@ imbalanced-learn
 tqdm
 scipy
 requests
+nltk
+gensim
+wordcloud

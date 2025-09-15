@@ -5,7 +5,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text(encoding="utf-8")
 setup(
     name="mlforgex",
-    version="1.0.13",
+    version="1.0.14",
     packages=find_packages(),
     install_requires = [
     "pandas",
@@ -17,7 +17,10 @@ setup(
     "imbalanced-learn",
     "tqdm",
     "scipy",
-    "requests"
+    "requests",
+    "nltk",
+    "gensim",
+    "wordcloud"
 ]
 ,
     long_description=long_description,

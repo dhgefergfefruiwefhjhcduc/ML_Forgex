@@ -26,10 +26,20 @@ from sklearn.metrics import (
     r2_score,
     accuracy_score,
 )
-from sklearn.inspection import permutation_importance
 from sklearn.model_selection import learning_curve
+import re
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+from nltk.tokenize import word_tokenize
+import gensim
+stopword=stopwords.words('english')
+stopword.remove("not")
+stopword.remove("nor")
+stopword.remove("no")
+lemmatizer=WordNetLemmatizer()
 
-def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=100,n_splits=5,artifacts_dir=None,artifacts_name="artifacts",fast=False,corr_threshold=0.85,skew_threshold=1,z_threshold=3,overfit_threshold=0.15):
+
+def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=100,n_splits=5,artifacts_dir=None,artifacts_name="artifacts",fast=False,corr_threshold=0.85,skew_threshold=1,z_threshold=3,overfit_threshold=0.15,nlp=False):
     """
 Trains and evaluates a machine learning model using the provided dataset, 
 with automated preprocessing, feature selection, hyperparameter tuning, 
@@ -103,6 +113,12 @@ Args:
         - A smaller value (e.g., 0.05) makes overfitting detection stricter.
         - A larger value (e.g., 0.3) allows more tolerance.
         Default is 0.15.
+    
+    nlp (bool, optional):
+        If True, enable NLP/text-mode: combine text columns (or use 'text'), run tokenization,
+        stopword removal and lemmatization, vectorize text (Word2Vec by default), enforce label
+        encoding and classification flow, and save the Word2Vec model to artifacts. Default False.
+        
 
 Returns:
     dict:
@@ -124,117 +140,159 @@ Returns:
     data=pd.read_csv(data_path)
     df=pd.DataFrame(data)
     # os.remove(data_path)
-    df.head()
     print("Data loaded successfully")
-    df=data_cleaning(df,skew_threshold,z_threshold)
-    mild=False
-    moderate=False
-    majority=max(df[dependent_feature].value_counts())
-    minority=min(df[dependent_feature].value_counts())
-    IR = majority/minority
-    # print(f"Imbalance Ratio: {IR}")
-    if IR <= 3:
-        # print("Mild Imbalance")
-        mild=True
-    elif 3 < IR <= 20:
-        # print("Moderate Imbalance")
-        moderate=True
-
-    # feature selection
-    # Replace < Dependent feture > and < Independent feature > with actual column names
-    corr_thresh=set()
-    dropcorr=set()
-    dropcorr.update([i for i in df.columns if df[i].nunique() == 1])
-    df=df.drop(columns=dropcorr, axis=1)
-    x=df.drop(columns=[dependent_feature])
-    y=df[dependent_feature]
-    # print("Independent Feature:", x)
-    # print("Dependent Feature:", y)
     regressor=False
     classification=False
     encode=False
-    print("Finding the type of problem...")
-    if df[dependent_feature].dtype=="object":
-        classification=True
-        encode=True
-        print("Classification Problem")
+    mild=False
+    moderate=False
+    corr_thresh=set()
+    dropcorr=set()
+    cat_features=[]
+    num_features=[]
+    if nlp:
+        text_col=[i for i in df.columns if df[i].dtype=="object" and i!=dependent_feature]
+        dropcorr.update([i for i in df.columns if i not in text_col and i!=dependent_feature])
+        cat_features=text_col.copy()
+        if "text" in df.columns:
+            other_text_cols = [c for c in text_col if c != "text"]
+            if other_text_cols:
+                df["text"] = df["text"].fillna("").astype(str) + " " + df[other_text_cols].astype(str).agg(" ".join, axis=1)
+                df["text"] = df["text"].str.strip()
+                df.drop(columns=other_text_cols, inplace=True)
+        else:
+            if text_col:
+                df["text"] = df[text_col].astype(str).agg(" ".join, axis=1).str.strip()
+                df.drop(columns=text_col, inplace=True)
+            else:
+                df["text"] = "" 
+        df.drop(columns=dropcorr,inplace=True)
+        x=df[["text"]]
+        y=df[dependent_feature]
+        is_multiclass = len(set(y)) > 2
+        average_type = "weighted" if is_multiclass else "binary"
+        print("preprocessing text...")
+        x.loc[:, "text"] = x["text"].apply(preprocess)
+        mask = x["text"].str.strip() != ""
+        x = x[mask]
+        y = y[mask]
+        x = x.reset_index(drop=True)
+        y = y.reset_index(drop=True)
+        if df[dependent_feature].dtype=="object": encode=True
+        
     else:
-        if(df[dependent_feature].nunique() < 20):
+        df=data_cleaning(df,skew_threshold,z_threshold,dependent_feature)
+        majority=max(df[dependent_feature].value_counts())
+        minority=min(df[dependent_feature].value_counts())
+        IR = majority/minority
+        # print(f"Imbalance Ratio: {IR}")
+        if IR <= 3:
+            # print("Mild Imbalance")
+            mild=True
+        elif 3 < IR <= 20:
+            # print("Moderate Imbalance")
+            moderate=True
+
+        # feature selection
+        # Replace < Dependent feture > and < Independent feature > with actual column names
+        dropcorr.update([i for i in df.columns if df[i].nunique() == 1])
+        df.drop(columns=dropcorr, axis=1,inplace=True)
+        dropcorr.update([i for i in df.columns if df[i].nunique()==df.shape[0] and df[i].dtype in ["int64","object"]])
+        df.drop(columns=[col for col in df.columns if df[col].nunique()==df.shape[0] and df[col].dtype in ["int64","object"]], inplace=True)
+        x=df.drop(columns=[dependent_feature])
+        y=df[dependent_feature]
+        # print("Independent Feature:", x)
+        # print("Dependent Feature:", y)
+        print("Finding the type of problem...")
+        if df[dependent_feature].dtype=="object":
             classification=True
+            encode=True
             print("Classification Problem")
         else:
-            regressor=True
-            print("Regression Problem")
-    corr_thresh.update([i for i in df.columns if df[i].nunique() == 1])
+            if(df[dependent_feature].nunique() < 20):
+                classification=True
+                print("Classification Problem")
+            else:
+                regressor=True
+                print("Regression Problem")
+        corr_thresh.update([i for i in df.columns if df[i].nunique() == 1])
     from sklearn.model_selection import train_test_split
     # Splitting the dataset into training and testing sets
     print("Splitting the dataset into training and testing sets...")
-    if classification:
+    if classification or nlp:
         x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.3, random_state=42,stratify=y)
     else:
         x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.3, random_state=42)
     print("Dataset split successfully")
+    if nlp:
+        print("Generating word vectors...")
+        word_token_train=[word_tokenize(i) for i in x_train["text"]]
+        mod=gensim.models.Word2Vec(word_token_train)
+        mod.save(os.path.join(artifacts_path,"word2vec.model"))
+        x_train=[avg_wordtovec(i,mod) for i in word_token_train]
+        word_token_test=[word_tokenize(i) for i in x_test["text"]]
+        x_test=[avg_wordtovec(i,mod) for i in word_token_test]
+    if not nlp:
+        cat_features=[i for i in x_train.columns if x_train[i].dtype=="object" and i!=dependent_feature]
+        num_features=[i for i in x_train.columns if x_train[i].dtype!="object" and i!=dependent_feature]
+        os.makedirs(plot_path, exist_ok=True)
+        
+        if len(num_features) > 0:
+            plt.figure(figsize=(12, 8))
+            sns.heatmap(
+                x[num_features].corr(),
+                annot=True,
+                fmt=".2f",
+                cmap="coolwarm",
+                annot_kws={"size": 14}
+            )
+            plt.title("Correlation Heatmap", fontsize=18)
+            plt.savefig(os.path.join(plot_path,"correlation_heatmap.png"), bbox_inches='tight')
+            plt.close()
+        def correlation(df,dataset,target,max_threshold):
+            dataset=dataset.copy()
+            corr_matrix=dataset.corr()
+            for i in range(len(dataset.columns)):
+                for j in range(i):
+                    colname = corr_matrix.columns[i]
+                    corr_value = abs(corr_matrix.iloc[i, j])
+                    if corr_value > max_threshold :
+                        corr_thresh.add(colname)
 
-    cat_features=[i for i in x_train.columns if x_train[i].dtype=="object" and i!=dependent_feature]
-    num_features=[i for i in x_train.columns if x_train[i].dtype!="object" and i!=dependent_feature]
-    os.makedirs(plot_path, exist_ok=True)
-    
-    if len(num_features) > 0:
-        plt.figure(figsize=(12, 8))
-        sns.heatmap(
-            x[num_features].corr(),
-            annot=True,
-            fmt=".2f",
-            cmap="coolwarm",
-            annot_kws={"size": 14}
-        )
-        plt.title("Correlation Heatmap", fontsize=18)
-        plt.savefig(os.path.join(plot_path,"correlation_heatmap.png"), bbox_inches='tight')
-        plt.close()
-    def correlation(df,dataset,target,max_threshold):
-        dataset=dataset.copy()
-        corr_matrix=dataset.corr()
-        for i in range(len(dataset.columns)):
-            for j in range(i):
-                colname = corr_matrix.columns[i]
-                corr_value = abs(corr_matrix.iloc[i, j])
-                if corr_value > max_threshold :
-                    corr_thresh.add(colname)
-
-        return corr_thresh
-    dropcorr.update(correlation(df,x_train[num_features],dependent_feature,corr_threshold))
-    x_train.drop([col for col in corr_thresh if col in x_train.columns], axis=1, inplace=True)
-    x_test.drop([col for col in corr_thresh if col in x_test.columns], axis=1, inplace=True)
-    cat_features = [i for i in x_train.columns if x_train[i].dtype == "object" and i != dependent_feature]
-    num_features = [i for i in x_train.columns if x_train[i].dtype != "object" and i != dependent_feature]
-    if classification:
+            return corr_thresh
+        dropcorr.update(correlation(df,x_train[num_features],dependent_feature,corr_threshold))
+        x_train.drop([col for col in corr_thresh if col in x_train.columns], axis=1, inplace=True)
+        x_test.drop([col for col in corr_thresh if col in x_test.columns], axis=1, inplace=True)
+        cat_features = [i for i in x_train.columns if x_train[i].dtype == "object" and i != dependent_feature]
+        num_features = [i for i in x_train.columns if x_train[i].dtype != "object" and i != dependent_feature]
+    if classification or nlp:
         is_multiclass = len(set(y_train)) > 2
         average_type = "weighted" if is_multiclass else "binary"
-        
-    print("Preprocessing the data...")  
-    from sklearn.preprocessing import StandardScaler, OneHotEncoder,OrdinalEncoder,LabelEncoder
-    from sklearn.compose import ColumnTransformer
-    scaler=StandardScaler()
-    ohe=OneHotEncoder(drop="first")
-    oe=OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)
     ohe_data=[]
     oe_data=[]
-    for i in cat_features:
-        if len(x_train[i].unique())>10:
-            oe_data.append(i)
-        else:
-            ohe_data.append(i)
-    # print("One Hot Encoding Features:", ohe_data)
-    # print("Ordinal Encoding Features:", oe_data)
-    preprocessor=ColumnTransformer(
-        [("OneHotEncoder",ohe,ohe_data),
-        ("OrdinalEncoder",oe,oe_data),
-        ("StandardScaler",scaler,num_features)]
-    )
-    x_train=preprocessor.fit_transform(x_train)
-    x_test=preprocessor.transform(x_test)
-    feature_names=preprocessor.get_feature_names_out()
-    if classification:
+    if not nlp:   
+        print("Preprocessing the data...")  
+        from sklearn.preprocessing import StandardScaler, OneHotEncoder,OrdinalEncoder,LabelEncoder
+        from sklearn.compose import ColumnTransformer
+        scaler=StandardScaler()
+        ohe=OneHotEncoder(drop="first",handle_unknown="ignore")
+        oe=OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)
+        for i in cat_features:
+            if len(x_train[i].unique())>10:
+                oe_data.append(i)
+            else:
+                ohe_data.append(i)
+        # print("One Hot Encoding Features:", ohe_data)
+        # print("Ordinal Encoding Features:", oe_data)
+        preprocessor=ColumnTransformer(
+            [("OneHotEncoder",ohe,ohe_data),
+            ("OrdinalEncoder",oe,oe_data),
+            ("StandardScaler",scaler,num_features)]
+        )
+        x_train=preprocessor.fit_transform(x_train)
+        x_test=preprocessor.transform(x_test)
+        feature_names=preprocessor.get_feature_names_out()
+    if classification or nlp:
         print("Balancing the dataset...")
         if mild :
             from imblearn.under_sampling import RandomUnderSampler
@@ -246,10 +304,12 @@ Returns:
             smote_tomek = SMOTETomek(random_state=42)
             x_train, y_train = smote_tomek.fit_resample(x_train, y_train)
             print("Moderate Imbalace Resolved")
-    if classification and encode:
-        le=LabelEncoder()
+    from sklearn.preprocessing import LabelEncoder
+    le=LabelEncoder()
+    if (classification and encode) or nlp:
         y_train=le.fit_transform(y_train)
         y_test=le.transform(y_test)
+        encode=True
     model_dict=[]
     # print("Training the models...")
     if regressor:
@@ -261,12 +321,12 @@ Returns:
         from sklearn.svm import SVR
         from sklearn.metrics import mean_absolute_error,mean_squared_error,r2_score
         models={
-            "RandomForestRegressor":RandomForestRegressor(),
+            "RandomForestRegressor":RandomForestRegressor(n_jobs=n_jobs),
             "GradientBoostingRegressor":GradientBoostingRegressor(),
             "AdaBoostRegressor":AdaBoostRegressor(),
             "XGBRegressor":XGBRegressor(),
-            "KNeighborsRegressor":KNeighborsRegressor(),
-            "LinearRegression":LinearRegression(),
+            "KNeighborsRegressor":KNeighborsRegressor(n_jobs=n_jobs),
+            "LinearRegression":LinearRegression(n_jobs=n_jobs),
             "Ridge":Ridge(),
             "Lasso":Lasso(),
             "ElasticNet":ElasticNet(),
@@ -301,45 +361,33 @@ Returns:
             "tuned":False
         })
 
-            
-            # print('Model performance for Training set')
-            # print("- mae: {:.4f}".format(model_train_mae))
-            # print('-mse: {:.4f}'.format(model_train_mse))
-            # print('- rmse: {:.4f}'.format(model_train_rmse))
-            # print('- r2: {:.4f}'.format(model_train_r2))
-
-            
-            
-            # print('----------------------------------')
-            
-            # print('Model performance for Test set')
-            # print('- mae: {:.4f}'.format(model_test_mae))
-            # print('- mse: {:.4f}'.format(model_test_mse))
-            # print('- rmse: {:.4f}'.format(model_test_rmse))
-            # print('- r2: {:.4f}'.format(model_test_r2))
-
-            
-            # print('='*35)
-            # print('\n')
     else:
         from sklearn.ensemble import RandomForestClassifier,GradientBoostingClassifier,AdaBoostClassifier
         from xgboost import XGBClassifier
         from sklearn.neighbors import KNeighborsClassifier
-        from sklearn.svm import SVC
+        from sklearn.svm import SVC,LinearSVC
         from sklearn.tree import DecisionTreeClassifier
-        from sklearn.linear_model import LogisticRegression
+        from sklearn.linear_model import LogisticRegression,SGDClassifier
+        from sklearn.naive_bayes import GaussianNB
         from sklearn.metrics import accuracy_score,confusion_matrix,classification_report,f1_score,roc_auc_score,roc_curve,precision_score,recall_score
         models={
-        "LogisticRegression":LogisticRegression(),
+        "LogisticRegression":LogisticRegression(n_jobs=n_jobs,max_iter=3000),
         "DecisionTreeClassifier":DecisionTreeClassifier(),
-        "RandomForestClassifier":RandomForestClassifier(),
+        "RandomForestClassifier":RandomForestClassifier(n_jobs=n_jobs),
         "GradientBoostingClassifier":GradientBoostingClassifier(),
         "AdaBoostClassifier":AdaBoostClassifier(),
-        "XGBClassifier":XGBClassifier(),
-        "KNeighborsClassifier":KNeighborsClassifier(),
-        "SVC":SVC(probability=True)
+        "XGBClassifier":XGBClassifier(n_jobs=n_jobs),
+        "KNeighborsClassifier":KNeighborsClassifier(n_jobs=n_jobs),
+        "SGDClassifier":SGDClassifier(n_jobs=n_jobs),
     }
-
+        if nlp:
+            models={
+                "GaussianNB":GaussianNB(),
+                "LogisticRegression":LogisticRegression(n_jobs=n_jobs,max_iter=3000),
+                "LinearSVC":LinearSVC(),
+                "RandomForestClassifier":RandomForestClassifier(n_jobs=n_jobs),
+                "XGBClassifier":XGBClassifier(n_jobs=n_jobs),
+            }
         for i in tqdm(range(len(list(models))), desc="Training Models", unit="model"):
             model = list(models.values())[i]
             # print("-> "+list(models.keys())[i],flush=True)
@@ -354,23 +402,29 @@ Returns:
             model_train_f1 = f1_score(y_train, y_train_pred, average=average_type) # Calculate F1-score
             model_train_precision = precision_score(y_train, y_train_pred, average=average_type,zero_division=0) # Calculate Precision
             model_train_recall = recall_score(y_train, y_train_pred, average=average_type,zero_division=0) # Calculate Recall
-            if average_type == "binary":
-                y_train_prob = model.predict_proba(x_train)[:,1]
-                model_train_rocauc_score = roc_auc_score(y_train, y_train_prob)
-            else:
-                y_train_prob=model.predict_proba(x_train)
-                model_train_rocauc_score = roc_auc_score(y_train, y_train_prob,multi_class='ovr',average=average_type) #Calculate Roc Auc Score
+            if hasattr(model,"predict_proba"):
+                if average_type == "binary":
+                    y_train_prob = model.predict_proba(x_train)[:,1]
+                    model_train_rocauc_score = roc_auc_score(y_train, y_train_prob)
+                else:
+                    y_train_prob=model.predict_proba(x_train)
+                    model_train_rocauc_score = roc_auc_score(y_train, y_train_prob,multi_class='ovr',average=average_type) #Calculate Roc Auc Score
             # Test set performance
+            else:
+                model_test_rocauc_score = np.nan  # Or 0, or skip ROC AUC for this model
             model_test_accuracy = accuracy_score(y_test, y_test_pred) # Calculate Accuracy
             model_test_f1 = f1_score(y_test, y_test_pred, average=average_type) # Calculate F1-score
             model_test_precision = precision_score(y_test, y_test_pred, average=average_type, zero_division=0) # Calculate Precision
             model_test_recall = recall_score(y_test, y_test_pred, average=average_type,zero_division=0) # Calculate Recall
-            if average_type == "binary":
-                y_test_prob = model.predict_proba(x_test)[:,1]
-                model_test_rocauc_score = roc_auc_score(y_test, y_test_prob)
+            if hasattr(model,"predict_proba"):
+                if average_type == "binary":
+                    y_test_prob = model.predict_proba(x_test)[:,1]
+                    model_test_rocauc_score = roc_auc_score(y_test, y_test_prob)
+                else:
+                    y_test_prob=model.predict_proba(x_test)
+                    model_test_rocauc_score = roc_auc_score(y_test, y_test_prob,multi_class='ovr',average=average_type) #Calculate Roc Auc Score
             else:
-                y_test_prob=model.predict_proba(x_test)
-                model_test_rocauc_score = roc_auc_score(y_test, y_test_prob,multi_class='ovr',average=average_type) #Calculate Roc Auc Score
+                model_test_rocauc_score = np.nan  # Or 0, or skip ROC AUC for this model
 
             model_dict.append({
                 "model":list(models.keys())[i],
@@ -386,31 +440,6 @@ Returns:
                 "test_rocauc_score": model_test_rocauc_score,
                 "tuned":False
             })
-
-
-
-            # print('Model performance for Training set')
-            # print("- Accuracy: {:.4f}".format(model_train_accuracy))
-            # print('- F1 score: {:.4f}'.format(model_train_f1))
-            
-            # print('- Precision: {:.4f}'.format(model_train_precision))
-            # print('- Recall: {:.4f}'.format(model_train_recall))
-            # print('- Roc Auc Score: {:.4f}'.format(model_train_rocauc_score))
-
-            
-            
-            # print('----------------------------------')
-            
-            # print('Model performance for Test set')
-            # print('- Accuracy: {:.4f}'.format(model_test_accuracy))
-            # print('- F1 score: {:.4f}'.format(model_test_f1))
-            # print('- Precision: {:.4f}'.format(model_test_precision))
-            # print('- Recall: {:.4f}'.format(model_test_recall))
-            # print('- Roc Auc Score: {:.4f}'.format(model_test_rocauc_score))
-
-            
-            # print('='*35)
-            # print('\n')
     print("Finding the best model...")
     if regressor:
         comparison_df=pd.DataFrame(model_dict)
@@ -425,234 +454,43 @@ Returns:
         # print("===="*35)
         best_models = comparison_df.nsmallest(3, 'Combined Score')
 
-    if classification:
+    if classification or nlp:
         comparison_df=pd.DataFrame(model_dict)
         comparison_df["total_accuracy"]=comparison_df["train_accuracy"]+comparison_df["test_accuracy"]
         comparison_df["total_f1"]=comparison_df["train_f1"]+comparison_df["test_f1"]
-        # print(comparison_df)
         comparison_df['Norm F1'] = comparison_df["total_f1"] / comparison_df['total_f1'].max()
         comparison_df['Norm Accuracy'] = comparison_df["total_accuracy"] / comparison_df['total_accuracy'].max()
         comparison_df['Combined Score'] = f1_prob * comparison_df['Norm F1'] + (1-f1_prob)* comparison_df['Norm Accuracy']
         combined_score_ranking = comparison_df.sort_values('Combined Score',ascending=False)
         combined_score_ranking=combined_score_ranking[combined_score_ranking["train_f1"]-combined_score_ranking["test_f1"]<overfit_threshold]
-        # print(combined_score_ranking[["model","train_accuracy", "train_f1", "test_accuracy", "test_f1","total_accuracy","total_f1","Combined Score"]])
-        # print("===="*35)
         best_models = combined_score_ranking.nlargest(3, 'Combined Score')
-        
-    # print("Best Models based on Combined Score:", best_models[["model"]])
-    # print("===="*35)
-    # print(best_models)
-    # print("===="*35)
     top_model=[i  for i in best_models["model"] ]
     if(len(top_model)==0):
         print("No suitable models found after filtering. Please check your data, model configuration, or relax the overfitting threshold.")
         return
     print("Top Model:",top_model)
-    # print("Training the best models with enhanced parameters...")
     randomcv_model = []
     if regressor:
-        reg_params = [
-            ["RandomForestRegressor", {
-                'n_estimators': [100, 200,300,400],
-                'max_depth': [None, 5, 10, 15, 20, 30, 50],
-                'min_samples_split': [2, 5, 10, 15],
-                'min_samples_leaf': [1, 2, 4, 6],
-                'max_features': ['sqrt', 'log2', None, 0.5, 0.7],
-                'bootstrap': [True, False],
-                'random_state': [42]
-            }],
-            
-            ["GradientBoostingRegressor", {
-                'n_estimators': [100, 200,300,400],
-                'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.2],
-                'max_depth': [3, 4, 5, 6, 7, 8],
-                'min_samples_split': [2, 5, 10],
-                'min_samples_leaf': [1, 2, 4],
-                'subsample': [0.7, 0.8, 0.9, 1.0],
-                'max_features': ['sqrt', 'log2', None],
-                'loss': ['squared_error', 'absolute_error', 'huber', 'quantile'],
-                'random_state': [42]
-            }],
-            
-            ["AdaBoostRegressor", {
-                'n_estimators': [50, 100, 150, 200, 300],
-                'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.5, 1.0],
-                'loss': ['linear', 'square', 'exponential'],
-                'random_state': [42]
-            }],
-            
-            ["XGBRegressor", {
-                'n_estimators': [100, 200,300,400],
-                'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.2],
-                'max_depth': [3, 4, 5, 6, 7, 8, 9],
-                'min_child_weight': [1, 2, 3, 4],
-                'gamma': [0, 0.1, 0.2, 0.3, 0.4],
-                'subsample': [0.6, 0.7, 0.8, 0.9, 1.0],
-                'colsample_bytree': [0.6, 0.7, 0.8, 0.9, 1.0],
-                'reg_alpha': [0, 0.1, 0.5, 1],
-                'reg_lambda': [0, 0.1, 1, 10],
-                'random_state': [42]
-            }],
-            
-            ["KNeighborsRegressor", {
-                'n_neighbors': [3, 5, 7, 10, 15, 20],
-                'weights': ['uniform', 'distance'],
-                'algorithm': ['auto', 'ball_tree', 'kd_tree', 'brute'],
-                'leaf_size': [10, 20, 30, 40, 50],
-                'p': [1, 2, 3]
-            }],
-            
-            ["LinearRegression", {
-                'fit_intercept': [True, False],
-                'positive': [True, False],
-                'copy_X': [True, False]
-            }],
-            
-            ["Ridge", {
-                'alpha': [0.001, 0.01, 0.1, 1.0, 10.0, 100.0],
-                'solver': ['auto', 'svd', 'cholesky', 'lsqr', 'sparse_cg', 'sag', 'saga'],
-                'fit_intercept': [True, False],
-                'random_state': [42]
-            }],
-            
-            ["Lasso", {
-                'alpha': [0.0001, 0.001, 0.01, 0.1, 1.0],
-                'max_iter': [1000, 2000, 5000, 10000],
-                'selection': ['cyclic', 'random'],
-                'random_state': [42]
-            }],
-            
-            ["ElasticNet", {
-                'alpha': [0.0001, 0.001, 0.01, 0.1, 1.0],
-                'l1_ratio': [0.1, 0.3, 0.5, 0.7, 0.9],
-                'max_iter': [1000, 5000],
-                'selection': ['cyclic', 'random'],
-                'random_state': [42]
-            }],
-            
-            ["DecisionTreeRegressor", {
-                'max_depth': [None, 5, 10, 15, 20, 30],
-                'min_samples_split': [2, 5, 10, 15],
-                'min_samples_leaf': [1, 2, 4, 6, 8],
-                'max_features': ['sqrt', 'log2', None, 0.5, 0.7],
-                'criterion': ['squared_error', 'friedman_mse', 'absolute_error', 'poisson'],
-                'random_state': [42]
-            }],
-            
-            ["SVR", {
-                'kernel': ['rbf', 'linear', 'poly', 'sigmoid'],
-                'C': [0.1, 0.5, 1, 5, 10, 50, 100],
-                'epsilon': [0.01, 0.1, 0.2, 0.5, 1.0],
-                'gamma': ['scale', 'auto'] + [0.001, 0.01, 0.1, 1, 10],
-                'degree': [2, 3, 4]  # Only for poly kernel
-            }]
-        ]
-        
+        from mlforge.params import reg_params
         for i in reg_params:
             if i[0] in top_model:
                 randomcv_model.append((i[0], models[i[0]], i[1]))
-        
-        # print("Enhanced Random CV Model Parameters:", randomcv_model)
-    if classification:
-        class_params = [
-            ["LogisticRegression", {
-                'penalty': ['l2'],               
-                'C': np.logspace(-4, 4, 20),
-                'solver': ['lbfgs', 'sag', 'saga','newton-cg','newton-cholesky'],
-                'max_iter': [100, 200, 500, 1000],
-                'class_weight': [None, 'balanced'],
-            }],
-            
-            ["DecisionTreeClassifier", {
-                'criterion': ['gini', 'entropy', 'log_loss'],
-                'splitter': ['best', 'random'],
-                'max_depth': [None, 5, 10, 15, 20, 30, 50],
-                'min_samples_split': [2, 5, 10, 15, 20],
-                'min_samples_leaf': [1, 2, 4, 6, 8],
-                'max_features': ['sqrt', 'log2', None, 0.3, 0.5, 0.7],
-                'class_weight': [None, 'balanced'],
-                'random_state': [42]
-            }],
-            
-            ["RandomForestClassifier", {
-                'n_estimators': [100, 200,300,400],
-                'criterion': ['gini', 'entropy', 'log_loss'],
-                'max_depth': [None, 5, 10, 15, 20, 30, 50],
-                'min_samples_split': [2, 5, 10, 15],
-                'min_samples_leaf': [1, 2, 4, 6],
-                'max_features': ['sqrt', 'log2', None, 0.5, 0.7],
-                'bootstrap': [True, False],
-                'class_weight': [None, 'balanced', 'balanced_subsample'],
-                'random_state': [42]
-            }],
-            
-            ["GradientBoostingClassifier", {
-                'n_estimators': [100, 200,300,400],
-                'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.2],
-                'loss': ['log_loss', 'exponential'],
-                'max_depth': [3, 4, 5, 6, 7, 8],
-                'min_samples_split': [2, 5, 10],
-                'min_samples_leaf': [1, 2, 4],
-                'subsample': [0.7, 0.8, 0.9, 1.0],
-                'max_features': ['sqrt', 'log2', None],
-                'random_state': [42]
-            }],
-            
-            ["AdaBoostClassifier", {
-                'n_estimators': [50, 100, 150, 200,300,400],
-                'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.5, 1.0],
-                'random_state': [42]
-            }],
-            
-            ["XGBClassifier", {
-                'n_estimators': [100, 200,300 ,400],
-                'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.2],
-                'max_depth': [3, 4, 5, 6, 7, 8, 9],
-                'min_child_weight': [1, 2, 3, 4],
-                'gamma': [0, 0.1, 0.2, 0.3, 0.4],
-                'subsample': [0.6, 0.7, 0.8, 0.9, 1.0],
-                'colsample_bytree': [0.6, 0.7, 0.8, 0.9, 1.0],
-                'reg_alpha': [0, 0.1, 0.5, 1],
-                'reg_lambda': [0, 0.1, 1, 10],
-                'scale_pos_weight': [1, 5, 10],  # For imbalanced classes
-                'random_state': [42],
-                'eval_metric': ['logloss', 'aucpr', 'auc']
-            }],
-            
-        
-            
-            ["KNeighborsClassifier", {
-                'n_neighbors': [3, 5, 7, 10, 15, 20, 25],
-                'weights': ['uniform', 'distance'],
-                'algorithm': ['auto', 'ball_tree', 'kd_tree', 'brute'],
-                'leaf_size': [10, 20, 30, 40, 50],
-                'p': [1, 2, 3],
-                'metric': ['minkowski', 'euclidean', 'manhattan']
-            }],
-            
-            ["SVC", {
-                'kernel': ['linear', 'rbf', 'poly', 'sigmoid'],
-                'C': [0.001, 0.01, 0.1, 1, 5, 10, 50, 100],
-                'gamma': ['scale', 'auto'] + [0.001, 0.01, 0.1, 1, 10],
-                'degree': [2, 3, 4, 5],  # For poly kernel
-                'class_weight': [None, 'balanced'],
-                'probability': [True],  # If you need predict_proba
-                'random_state': [42]
-            }],
-            
-        
-        ]
-        
+    if classification :
+        from mlforge.params import class_params
         for i in class_params:
             if i[0] in top_model:
                 randomcv_model.append((i[0], models[i[0]], i[1]))
         
         # print("Enhanced Classification Model Parameters:", randomcv_model)
-
+    if nlp:
+        from mlforge.params import nlp_params
+        for i in nlp_params:
+             if i[0] in top_model:
+                randomcv_model.append((i[0], models[i[0]], i[1]))
     from sklearn.model_selection import RandomizedSearchCV
 
     model_param = {}
-    if classification:
+    if classification or nlp:
         from sklearn.model_selection import StratifiedKFold
         cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
     else:
@@ -688,7 +526,7 @@ Returns:
                 "DecisionTreeRegressor":DecisionTreeRegressor,
                 "SVR":SVR
             }
-    if classification:
+    if classification or nlp:
         model_cls={
                 "LogisticRegression":LogisticRegression,
                 "DecisionTreeClassifier":DecisionTreeClassifier,
@@ -697,7 +535,15 @@ Returns:
                 "AdaBoostClassifier":AdaBoostClassifier,
                 "XGBClassifier":XGBClassifier,
                 "KNeighborsClassifier":KNeighborsClassifier,
-                "SVC":SVC
+                "SGDClassifier":SGDClassifier
+            }
+        if nlp:
+            model_cls={
+                "GaussianNB":GaussianNB,
+                "LogisticRegression":LogisticRegression,
+                "LinearSVC":LinearSVC,
+                "RandomForestClassifier":RandomForestClassifier,
+                "XGBClassifier":XGBClassifier,
             }
     for i in model_param:
         best_params.append([i,model_param[i]])
@@ -743,28 +589,7 @@ Returns:
         ignore_index=True
     )
 
-            
-            # print('Model performance for Training set')
-            # print("- mae: {:.4f}".format(model_train_mae))
-            # print('-mse: {:.4f}'.format(model_train_mse))
-            # print('- rmse: {:.4f}'.format(model_train_rmse))
-            # print('- r2: {:.4f}'.format(model_train_r2))
-
-            
-            
-            # print('----------------------------------')
-            
-            # print('Model performance for Test set')
-            # print('- mae: {:.4f}'.format(model_test_mae))
-            # print('- mse: {:.4f}'.format(model_test_mse))
-            # print('- rmse: {:.4f}'.format(model_test_rmse))
-            # print('- r2: {:.4f}'.format(model_test_r2))
-
-            
-            # print('='*35)
-            # print('\n')
-
-    if classification:
+    if classification or nlp:
 
         for i in range(len(list(models))):
             model = list(models.values())[i]
@@ -780,24 +605,29 @@ Returns:
             model_train_f1 = f1_score(y_train, y_train_pred, average=average_type,zero_division=0) # Calculate F1-score
             model_train_precision = precision_score(y_train, y_train_pred,average=average_type,zero_division=0) # Calculate Precision
             model_train_recall = recall_score(y_train, y_train_pred,average=average_type,zero_division=0) # Calculate Recall
-            if average_type == "binary":
-                y_train_prob = model.predict_proba(x_train)[:,1]
-                model_train_rocauc_score = roc_auc_score(y_train, y_train_prob)
-            else:
-                y_train_prob=model.predict_proba(x_train)
-                model_train_rocauc_score = roc_auc_score(y_train, y_train_prob, multi_class='ovr', average=average_type)
+            if hasattr(model,"predict_proba"):
+                if average_type == "binary":
+                    y_train_prob = model.predict_proba(x_train)[:,1]
+                    model_train_rocauc_score = roc_auc_score(y_train, y_train_prob)
+                else:
+                    y_train_prob=model.predict_proba(x_train)
+                    model_train_rocauc_score = roc_auc_score(y_train, y_train_prob, multi_class='ovr', average=average_type)
             # Test set performance
+            else:
+                model_train_rocauc_score = np.nan  # Or 0, or skip ROC AUC for this model
             model_test_accuracy = accuracy_score(y_test, y_test_pred) # Calculate Accuracy
             model_test_f1 = f1_score(y_test, y_test_pred, average=average_type,zero_division=0) # Calculate F1-score
             model_test_precision = precision_score(y_test, y_test_pred,average=average_type,zero_division=0) # Calculate Precision
             model_test_recall = recall_score(y_test, y_test_pred,average=average_type,zero_division=0) # Calculate Recall
-            if average_type == "binary":
-                y_test_prob = model.predict_proba(x_test)[:,1]
-                model_test_rocauc_score = roc_auc_score(y_test, y_test_prob)
+            if hasattr(model,"predict_proba"):
+                if average_type == "binary":
+                    y_test_prob = model.predict_proba(x_test)[:,1]
+                    model_test_rocauc_score = roc_auc_score(y_test, y_test_prob)
+                else:
+                    y_test_prob=model.predict_proba(x_test)
+                    model_test_rocauc_score = roc_auc_score(y_test, y_test_prob, multi_class='ovr', average=average_type)
             else:
-                y_test_prob=model.predict_proba(x_test)
-                model_test_rocauc_score = roc_auc_score(y_test, y_test_prob, multi_class='ovr', average=average_type)
-            
+                model_test_rocauc_score = np.nan  # Or 0, or skip ROC AUC for this model
             model_dict={
             "model":list(models.keys())[i],
             "train_accuracy": model_train_accuracy,
@@ -816,29 +646,7 @@ Returns:
         [best_models_copy, pd.DataFrame([model_dict])],
         ignore_index=True
     )
-                        
-            # print('Model performance for Training set')
-            # print("- Accuracy: {:.4f}".format(model_train_accuracy))
-            # print('- F1 score: {:.4f}'.format(model_train_f1))
-            
-            # print('- Precision: {:.4f}'.format(model_train_precision))
-            # print('- Recall: {:.4f}'.format(model_train_recall))
-            # print('- Roc Auc Score: {:.4f}'.format(model_train_rocauc_score))
 
-            
-            
-            # print('----------------------------------')
-            
-            # print('Model performance for Test set')
-            # print('- Accuracy: {:.4f}'.format(model_test_accuracy))
-            # print('- F1 score: {:.4f}'.format(model_test_f1))
-            # print('- Precision: {:.4f}'.format(model_test_precision))
-            # print('- Recall: {:.4f}'.format(model_test_recall))
-            # print('- Roc Auc Score: {:.4f}'.format(model_test_rocauc_score))
-
-            
-            # print('='*35)
-            # print('\n')
     best_models_copy
     if regressor:
         best_models_copy["total_rmse"]=best_models_copy["train_rmse"]+best_models_copy["test_rmse"]
@@ -847,20 +655,17 @@ Returns:
         best_models_copy['Norm R2'] = 1 - (best_models_copy["total_r2"] / best_models_copy['total_r2'].max())
         best_models_copy['Combined Score'] = rmse_prob * best_models_copy['Norm RMSE'] + (1-rmse_prob)* best_models_copy['Norm R2']
         combined_score_ranking = best_models_copy.sort_values('Combined Score').reset_index(drop=True)
-    if classification:
+    if classification or nlp:
         best_models_copy["total_accuracy"]=best_models_copy["train_accuracy"]+best_models_copy["test_accuracy"]
         best_models_copy["total_f1"]=best_models_copy["train_f1"]+best_models_copy["test_f1"]
         best_models_copy['Norm F1'] = best_models_copy["total_f1"] / best_models_copy['total_f1'].max()
         best_models_copy['Norm Accuracy'] = best_models_copy["total_accuracy"] / best_models_copy['total_accuracy'].max()
         best_models_copy['Combined Score'] = f1_prob * best_models_copy['Norm F1'] + (1-f1_prob)* best_models_copy['Norm Accuracy']
         combined_score_ranking = best_models_copy.sort_values('Combined Score',ascending=False).reset_index(drop=True)
-    # print(combined_score_ranking.iloc[0:1,:]["model"][0])
-    # print(combined_score_ranking)
 
-    if classification:
+
+    if classification or nlp:
         combined_score_ranking=combined_score_ranking[combined_score_ranking["train_f1"]-combined_score_ranking["test_f1"]<overfit_threshold]
-    # print("====="*35)
-    # print(combined_score_ranking.iloc[0:1,:])
     best_model_name = combined_score_ranking.iloc[0]["model"]
     best_param_dict = None
     for name, params in best_params:
@@ -868,10 +673,8 @@ Returns:
             best_param_dict = params
             break
     model = model_cls[best_model_name](**best_param_dict)
-    # print("Best Model Name:", best_model_name)
-    # print("Best Model Parameters:", best_param_dict)
     model.fit(x_train, y_train)
-    # print("Best Model Trained Successfully")
+
     print("Saving the model , preprocessor...")
     model_path = os.path.join(artifacts_path, "model.pkl")
     preprocessor_path = os.path.join(artifacts_path, "preprocessor.pkl")
@@ -882,10 +685,11 @@ Returns:
     with open(model_path, "wb") as f:
         pickle.dump(to_save, f)
 
-    with open(preprocessor_path, "wb") as f:
-        pickle.dump(preprocessor, f)
+    if not nlp:
+        with open(preprocessor_path, "wb") as f:
+            pickle.dump(preprocessor, f)
     encoder_path = None
-    if classification:
+    if classification or nlp:
         if encode:
             encoder_path = os.path.join(artifacts_path, "encoder.pkl")
             with open(encoder_path, "wb") as f:
@@ -910,6 +714,9 @@ Returns:
             "Hyper tuned": bool(combined_score_ranking.iloc[0]["tuned"]),
             "Dropped Columns":list(dropcorr)
     }
+        if nlp: 
+            response["Problem_type"]="NLP"
+            create_cloud(df,plot_path)
         if(response["Hyper tuned"]):
             response["Best Params"] = best_param_dict
         plot_classification_metrics(model,x_train, y_train, x_test, y_test,plot_path=plot_path)
@@ -963,10 +770,11 @@ Returns:
 
     print("artifacts_path:", artifacts_path)
     print("model_path:", model_path)
-    print("preprocessor_path:", preprocessor_path)
+    if not nlp : print("preprocessor_path:", preprocessor_path)
     if encoder_path:
         print("encoder_path:", encoder_path)
-    feature_importance(model, plot_path, feature_names)
+    if not nlp:
+        feature_importance(model, plot_path, feature_names)
     shutil.rmtree(temp_path)
     # return {"status": "success", "model": "trained_model.pkl"}
 
@@ -1105,25 +913,31 @@ def feature_importance(model, plot_path, feature_names):
 
 
 
-def data_cleaning(df, skew_thres, z_thres):
+def data_cleaning(df, skew_thres, z_thres,target):
     df.replace(["", "NA", "na", "N/A", "n/a", "?", "--", "-"], np.nan, inplace=True)
     for col in df.columns:
         if df[col].dtype == "object" or df[col].dtype.name == "category":
-            if not df[col].mode().empty:
-                df[col].fillna(df[col].mode()[0], inplace=True)
+            mode_vals = df[col].mode(dropna=True)
+            if not mode_vals.empty:
+                df[col] = df[col].fillna(mode_vals.iloc[0]) 
+            else:
+                df[col] = df[col].fillna("")  
         else:
-            df[col].fillna(df[col].median(), inplace=True)
+            med = df[col].median()
+            if np.isnan(med):
+                med = 0
+            df[col] = df[col].fillna(med)  
     df.drop_duplicates(inplace=True, ignore_index=True)
-    df = remove_outlier(df, skew_thres, z_thres)
+    df = remove_outlier(df, skew_thres, z_thres,target)
     return df
 
 
-def remove_outlier(df, skew_thres, z_thresh):
+def remove_outlier(df, skew_thres, z_thresh,target):
     from scipy import stats
     numeric_cols = df.select_dtypes(include=[np.number]).columns
 
     for col in numeric_cols:
-        if df[col].nunique(dropna=True) <= 1:  
+        if df[col].nunique(dropna=True) <= 1 or col==target:  
             continue
 
         if abs(df[col].skew(skipna=True)) > skew_thres:
@@ -1141,6 +955,42 @@ def remove_outlier(df, skew_thres, z_thresh):
 
     return df.reset_index(drop=True)
 
+def preprocess(text):
+    text=text.strip()
+    text=text.lower()
+    text=re.sub('[^a-z A-z 0-9-]+', '',text)
+    text=" ".join([y for y in text.split() if y not in stopword])
+    text=re.sub(r'(http|https|ftp|ssh)://([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:/~+#-]*[\w@?^=%&/~+#-])?', '' , str(text))
+    text= " ".join(text.split())
+    text=" ".join([lemmatizer.lemmatize(word) for word in text.split()])
+    return text
+
+def avg_wordtovec(doc,model):
+    vector=[model.wv[word] for word in doc if word in model.wv.index_to_key]
+    if not vector:
+        return np.zeros(model.vector_size)
+    return np.mean(vector,axis=0)
+
+def create_cloud(df, plot_path):
+    from wordcloud import WordCloud, STOPWORDS
+    os.makedirs(plot_path, exist_ok=True)
+    import matplotlib.pyplot as plt
+    text_data = " ".join(df["text"].astype(str).tolist())
+    stopwords = set(STOPWORDS)
+    wordcloud = WordCloud(
+        width=800,
+        height=400,
+        background_color="black",
+        stopwords=stopwords,
+        colormap="viridis"
+    ).generate(text_data)
+    plt.figure(figsize=(12, 6))
+    plt.imshow(wordcloud, interpolation="bilinear")
+    plt.axis("off")
+    plt.savefig(os.path.join(plot_path, "wordcloud.png"), bbox_inches='tight')
+    plt.close()
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser()
@@ -1151,8 +1001,8 @@ def main():
     parser.add_argument("--n_jobs", default=-1, type=int, help="Number of jobs to run in parallel")
     parser.add_argument("--n_iter", default=100, type=int, help="Number of iterations for hyperparameter tuning")
     parser.add_argument("--n_splits", default=5, type=int, help="Number of splits for cross-validation")
-    parser.add_argument("--no_fast", action="store_false", default=False,help="Disable fast mode for hyperparameter tuning")
-    parser.add_argument("--fast", action="store_true", dest="no_fast",help="Enable fast mode for hyperparameter tuning")
+    parser.add_argument("--fast", action="store_true", default=False,
+                       help="Enable fast mode for hyperparameter tuning (skip exhaustive tuning).")
     parser.add_argument("--artifacts_dir", default=None, help="Path to save the artifacts")
     parser.add_argument("--artifacts_name", default="artifacts", help="Name of the artifacts directory")
     parser.add_argument("--corr_threshold", type=float, default=0.85, help="Maximum threshold for feature selection")
@@ -1161,6 +1011,7 @@ def main():
     parser.add_argument("--overfit_threshold", type=float, default=0.15, 
                         help="If the difference between training and test F1 score exceeds this value, "
                              "the model is flagged as overfitting")
+    parser.add_argument("--nlp", action="store_true", default=False,help="Enable NLP/text-mode processing (combine text cols, preprocess, vectorize).")
 
     args = parser.parse_args()
 
@@ -1178,5 +1029,8 @@ def main():
         corr_threshold=args.corr_threshold,
         skew_threshold=args.skew_threshold,
         z_threshold=args.z_threshold,
-        overfit_threshold=args.overfit_threshold )
+        overfit_threshold=args.overfit_threshold ,
+        nlp=args.nlp)
 
+if __name__ == "__main__":
+    train_model("cleaned_housing.csv", f1_prob=0.5, rmse_prob=0.3, dependent_feature="SalePrice", artifacts_name="housing_artifacts")
