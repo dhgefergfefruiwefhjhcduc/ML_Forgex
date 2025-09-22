@@ -1031,6 +1031,3 @@ def main():
         z_threshold=args.z_threshold,
         overfit_threshold=args.overfit_threshold ,
         nlp=args.nlp)
-
-if __name__ == "__main__":
-    train_model("cleaned_housing.csv", f1_prob=0.5, rmse_prob=0.3, dependent_feature="SalePrice", artifacts_name="housing_artifacts")
