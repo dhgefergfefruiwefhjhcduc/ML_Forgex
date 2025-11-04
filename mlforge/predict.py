@@ -1,6 +1,7 @@
 import pickle
-import pandas as pd;
-import os;
+import pandas as pd
+import os
+import numpy as np
 import gensim
 from nltk.tokenize import word_tokenize
 def predict(model_path,preprocessor_path,input_data, encoder_path=None,predicted_data=True,nlp=False):
@@ -46,12 +47,26 @@ Example:
         encoder = pickle.load(open(encoder_path, 'rb')) if encoder_path else None
         df= pd.read_csv(input_data)
         if not nlp:
+            df.drop(columns=data["drop_col"],inplace=True)
+            df.replace(["", "NA", "na", "N/A", "n/a", "?", "--", "-"], np.nan, inplace=True)
+            for col in df.columns:
+                if df[col].dtype == "object" or df[col].dtype.name == "category":
+                    mode_vals = df[col].mode(dropna=True)
+                    if not mode_vals.empty:
+                        df[col] = df[col].fillna(mode_vals.iloc[0]) 
+                    else:
+                        df[col] = df[col].fillna("")  
+                else:
+                    med = df[col].median()
+                    if np.isnan(med):
+                        med = 0
+                    df[col] = df[col].fillna(med) 
             preprocessor = pickle.load(open(preprocessor_path, 'rb'))
             X = preprocessor.transform(df)
         else:
             text_col=[i for i in df.columns if df[i].dtype=="object" and i!=data["dependent_feature"]]
             df["new_text"] = df[text_col].astype(str).agg(" ".join, axis=1)
-            from mlforge.train import avg_wordtovec,preprocess
+            from mlforge.cleaning import avg_wordtovec,preprocess
             df["new_text"] = df["new_text"].apply(preprocess)
             word_token=[word_tokenize(i) for i in df["new_text"]]
             mod = gensim.models.Word2Vec.load(os.path.join(preprocessor_path))
@@ -84,6 +99,6 @@ def main():
 )
     parser.add_argument("--nlp", action="store_true", default=False, help="Enable NLP/text-mode")
     args = parser.parse_args()
-    print(predict(args.model_path, args.preprocessor_path, args.input_data, args.encoder_path,args.predicted_data,nlp=args.nlp))
-
+    predict(args.model_path, args.preprocessor_path, args.input_data, args.encoder_path,args.predicted_data,nlp=args.nlp)
+    print("Prediction completed and saved (if enabled).")
 

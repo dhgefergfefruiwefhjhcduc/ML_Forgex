@@ -195,14 +195,14 @@ nlp_params= [
         'class_weight': [None, 'balanced'],
     }],
     
-    ["LinearSVC", {   # Better than SVC with kernel for NLP
+    ["LinearSVC", { 
         'C': [0.01, 0.1, 1, 10],
         'class_weight': [None, 'balanced'],
         'max_iter': [1000, 3000]
     }],
     
     ["RandomForestClassifier", {
-        'n_estimators': [10,20,50,100],
+        'n_estimators': [10,20,50,100,200],
         'max_depth': [None, 10],
         'min_samples_split': [2, 10],
         'class_weight': ['balanced'],
@@ -210,7 +210,7 @@ nlp_params= [
     }],
     
     ["XGBClassifier", {
-        'n_estimators': [10,20,50,100],
+        'n_estimators': [10,20,50,100,200],
         'learning_rate': [0.1, 0.2],
         'max_depth': [3, 5],
         'subsample': [0.8, 1.0],

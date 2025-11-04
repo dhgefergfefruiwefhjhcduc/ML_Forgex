@@ -5,7 +5,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text(encoding="utf-8")
 setup(
     name="mlforgex",
-    version="1.0.14",
+    version="1.1.0",
     packages=find_packages(),
     install_requires = [
     "pandas",
@@ -20,9 +20,9 @@ setup(
     "requests",
     "nltk",
     "gensim",
-    "wordcloud"
-]
-,
+    "wordcloud",
+    "plotly"
+],
     long_description=long_description,
     long_description_content_type="text/markdown",
     entry_points={
@@ -43,7 +43,7 @@ setup(
     python_requires=">=3.8",
     project_urls={
         "Homepage": "https://github.com/dhgefergfefruiwefhjhcduc/ML_Forgex",
-        "Documentation": "https://github.com/dhgefergfefruiwefhjhcduc/ML_Forgex/blob/main/README.md",
+        "Documentation": "https://dhgefergfefruiwefhjhcduc.github.io/mlforgex_documentation/",
         "Source": "https://github.com/dhgefergfefruiwefhjhcduc/ML_Forgex",
         "Bug Tracker": "https://github.com/dhgefergfefruiwefhjhcduc/ML_Forgex/issues",
     }

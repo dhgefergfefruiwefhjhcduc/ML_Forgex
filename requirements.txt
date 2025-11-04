@@ -11,3 +11,4 @@ requests
 nltk
 gensim
 wordcloud
+plotly

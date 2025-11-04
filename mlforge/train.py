@@ -13,19 +13,14 @@ from tqdm import tqdm
 import numpy as np
 import seaborn as sns
 import matplotlib
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+from mlforge.dashboard import generate_dashboard
+
 matplotlib.use('Agg')  # Set backend to Agg to prevent GUI window
 import matplotlib.pyplot as plt
-from sklearn.metrics import (
-    confusion_matrix,
-    ConfusionMatrixDisplay,
-    roc_curve,
-    precision_recall_curve,
-    RocCurveDisplay,
-    PrecisionRecallDisplay,
-    mean_squared_error,
-    r2_score,
-    accuracy_score,
-)
+
 from sklearn.model_selection import learning_curve
 import re
 from nltk.corpus import stopwords
@@ -39,7 +34,7 @@ stopword.remove("no")
 lemmatizer=WordNetLemmatizer()
 
 
-def train_model(data_path, dependent_feature,rmse_prob,f1_prob,n_jobs=-1,n_iter=100,n_splits=5,artifacts_dir=None,artifacts_name="artifacts",fast=False,corr_threshold=0.85,skew_threshold=1,z_threshold=3,overfit_threshold=0.15,nlp=False):
+def train_model(data_path, dependent_feature,rmse_prob=0.7,f1_prob=0.3,n_jobs=-1,n_iter=100,n_splits=5,test_size=0.2,artifacts_dir=None,artifacts_name="artifacts",fast=False,corr_threshold=0.85,skew_threshold=1,z_threshold=3,overfit_threshold=0.15,nlp=False,dashboard_title="mlforgex Dashboard"):
     """
 Trains and evaluates a machine learning model using the provided dataset, 
 with automated preprocessing, feature selection, hyperparameter tuning, 
@@ -75,6 +70,10 @@ Args:
         Number of folds for cross-validation. 
         Determines how the dataset is split during validation.
         Default is 5.
+    
+    test_size (float, optional):
+        Proportion of the dataset to include in the test split.
+        Must be between 0.0 and 1.0. Default is 0.2.
 
     fast (bool, optional):
         If True, uses a faster but less exhaustive hyperparameter tuning approach
@@ -118,7 +117,9 @@ Args:
         If True, enable NLP/text-mode: combine text columns (or use 'text'), run tokenization,
         stopword removal and lemmatization, vectorize text (Word2Vec by default), enforce label
         encoding and classification flow, and save the Word2Vec model to artifacts. Default False.
-        
+
+    dashboard_title (str, optional):
+        Title for the dashboard generated after training. Default is "mlforgex Dashboard".
 
 Returns:
     dict:
@@ -134,7 +135,6 @@ Returns:
     temp_path=os.path.join(artifacts_path, "temp")
     os.makedirs(temp_path, exist_ok=True) 
     tempfile.tempdir= temp_path
-    plot_path = os.path.join(artifacts_path, "Plots")
     os.makedirs(artifacts_path, exist_ok=True)
     print("Getting data from:", data_path)
     data=pd.read_csv(data_path)
@@ -150,22 +150,37 @@ Returns:
     dropcorr=set()
     cat_features=[]
     num_features=[]
+    plots=[]
     if nlp:
         text_col=[i for i in df.columns if df[i].dtype=="object" and i!=dependent_feature]
+        cat_col = [i for i in df.columns if df[i].dtype == "object" and i != dependent_feature 
+           and (df[i].str.split().str.len() == 1).all()]
+        for col in cat_col:
+            mode_val = df[col].mode()
+            fill_value = mode_val.iloc[0] if not mode_val.empty else "Unknown"
+            df[col] = df[col].apply(
+                lambda x: fill_value if pd.isna(x) or str(x).lower().strip() in ["nan", "null", "none", "nil", "na"] else str(x)
+            )
         dropcorr.update([i for i in df.columns if i not in text_col and i!=dependent_feature])
         cat_features=text_col.copy()
         if "text" in df.columns:
+            df["text"] = df["text"].apply(lambda x: "" if pd.isna(x) or str(x).lower().strip() in ["nan", "null", "none", "nil", "na"] else str(x))
             other_text_cols = [c for c in text_col if c != "text"]
+            for col in other_text_cols:
+                df[col] = df[col].apply(lambda x: "" if pd.isna(x) or str(x).lower().strip() in ["nan", "null", "none", "nil", "na"] else str(x))
             if other_text_cols:
                 df["text"] = df["text"].fillna("").astype(str) + " " + df[other_text_cols].astype(str).agg(" ".join, axis=1)
                 df["text"] = df["text"].str.strip()
                 df.drop(columns=other_text_cols, inplace=True)
         else:
             if text_col:
+                for col in text_col:
+                    df[col] = df[col].apply(lambda x: "" if pd.isna(x) or str(x).lower().strip() in ["nan", "null", "none", "nil", "na"] else str(x))
                 df["text"] = df[text_col].astype(str).agg(" ".join, axis=1).str.strip()
                 df.drop(columns=text_col, inplace=True)
             else:
                 df["text"] = "" 
+        from mlforge.cleaning import preprocess
         df.drop(columns=dropcorr,inplace=True)
         x=df[["text"]]
         y=df[dependent_feature]
@@ -181,6 +196,7 @@ Returns:
         if df[dependent_feature].dtype=="object": encode=True
         
     else:
+        from mlforge.cleaning import data_cleaning
         df=data_cleaning(df,skew_threshold,z_threshold,dependent_feature)
         majority=max(df[dependent_feature].value_counts())
         minority=min(df[dependent_feature].value_counts())
@@ -195,7 +211,7 @@ Returns:
 
         # feature selection
         # Replace < Dependent feture > and < Independent feature > with actual column names
-        dropcorr.update([i for i in df.columns if df[i].nunique() == 1])
+        dropcorr.update([i for i in df.columns if df[i].nunique() == 1 or df[i].isna().sum()/len(df)>=0.6])
         df.drop(columns=dropcorr, axis=1,inplace=True)
         dropcorr.update([i for i in df.columns if df[i].nunique()==df.shape[0] and df[i].dtype in ["int64","object"]])
         df.drop(columns=[col for col in df.columns if df[col].nunique()==df.shape[0] and df[col].dtype in ["int64","object"]], inplace=True)
@@ -220,11 +236,12 @@ Returns:
     # Splitting the dataset into training and testing sets
     print("Splitting the dataset into training and testing sets...")
     if classification or nlp:
-        x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.3, random_state=42,stratify=y)
+        x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=test_size, random_state=42,stratify=y)
     else:
-        x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.3, random_state=42)
+        x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=test_size, random_state=42)
     print("Dataset split successfully")
     if nlp:
+        from mlforge.cleaning import avg_wordtovec
         print("Generating word vectors...")
         word_token_train=[word_tokenize(i) for i in x_train["text"]]
         mod=gensim.models.Word2Vec(word_token_train)
@@ -235,20 +252,77 @@ Returns:
     if not nlp:
         cat_features=[i for i in x_train.columns if x_train[i].dtype=="object" and i!=dependent_feature]
         num_features=[i for i in x_train.columns if x_train[i].dtype!="object" and i!=dependent_feature]
-        os.makedirs(plot_path, exist_ok=True)
         
         if len(num_features) > 0:
-            plt.figure(figsize=(12, 8))
-            sns.heatmap(
-                x[num_features].corr(),
-                annot=True,
-                fmt=".2f",
-                cmap="coolwarm",
-                annot_kws={"size": 14}
-            )
-            plt.title("Correlation Heatmap", fontsize=18)
-            plt.savefig(os.path.join(plot_path,"correlation_heatmap.png"), bbox_inches='tight')
-            plt.close()
+                    if num_features is None:
+                        num_features = x.select_dtypes(include=[np.number]).columns.tolist()
+                    
+                    # Calculate correlation matrix
+                    corr_matrix = x[num_features].corr()
+                    
+                    # Create Plotly heatmap
+                    fig = go.Figure(data=go.Heatmap(
+                        z=corr_matrix.values,
+                        x=corr_matrix.columns,
+                        y=corr_matrix.index,
+                        colorscale='RdBu_r',  # Red-Blue reversed (similar to coolwarm)
+                        zmin=-1,  # Fixed range for correlation
+                        zmax=1,
+                        hoverongaps=False,
+                        hovertemplate=(
+                            '<b>X:</b> %{x}<br>' +
+                            '<b>Y:</b> %{y}<br>' +
+                            '<b>Correlation:</b> %{z:.3f}<br>' +
+                            '<extra></extra>'
+                        ),
+                        colorbar=dict(
+                            title="Correlation",
+                            title_side="right",
+                            tickvals=[-1, -0.5, 0, 0.5, 1],
+                            ticktext=["-1.0", "-0.5", "0.0", "0.5", "1.0"]
+                        )
+                    ))
+                    
+                    # Add annotations (correlation values)
+                    for i in range(len(corr_matrix.columns)):
+                        for j in range(len(corr_matrix.index)):
+                            fig.add_annotation(
+                                x=corr_matrix.columns[i],
+                                y=corr_matrix.index[j],
+                                text=f"{corr_matrix.iloc[j, i]:.2f}",
+                                showarrow=False,
+                                font=dict(
+                                    size=12,
+                                    color='white' if abs(corr_matrix.iloc[j, i]) > 0.5 else 'black'
+                                )
+                            )
+                    
+                    # Update layout
+                    fig.update_layout(
+                        title=dict(
+                            text="Correlation Heatmap",
+                            x=0.5,
+                            font=dict(size=24, color='black')
+                        ),
+                        xaxis=dict(
+                            title="Features",
+                            tickangle=45,
+                            tickfont=dict(size=12),
+                            side="bottom"
+                        ),
+                        yaxis=dict(
+                            title="Features", 
+                            tickfont=dict(size=12),
+                            autorange="reversed"  # Match seaborn orientation
+                        ),
+                        template='plotly_white',
+                        width=1000,
+                        height=800,
+                        margin=dict(l=50, r=50, t=100, b=100)
+                    )
+                    
+                    plots.append(("Correlation Heatmap", fig))
+   
         def correlation(df,dataset,target,max_threshold):
             dataset=dataset.copy()
             corr_matrix=dataset.corr()
@@ -358,6 +432,10 @@ Returns:
             "train_r2": model_train_r2,
             "test_rmse": model_test_rmse,
             "test_r2": model_test_r2,
+            "train_mae": model_train_mae,
+            "test_mae": model_test_mae,
+            "train_mse": model_train_mse,
+            "test_mse": model_test_mse,
             "tuned":False
         })
 
@@ -583,6 +661,10 @@ Returns:
                         "train_r2": model_train_r2,
                         "test_rmse": model_test_rmse,
                         "test_r2": model_test_r2,
+                        "train_mae": model_train_mae,
+                        "test_mae": model_test_mae,
+                        "train_mse": model_train_mse,
+                        "test_mse": model_test_mse,
                         "tuned":True}
             best_models_copy = pd.concat(
         [best_models_copy, pd.DataFrame([model_dict])],
@@ -647,7 +729,6 @@ Returns:
         ignore_index=True
     )
 
-    best_models_copy
     if regressor:
         best_models_copy["total_rmse"]=best_models_copy["train_rmse"]+best_models_copy["test_rmse"]
         best_models_copy["total_r2"]=best_models_copy["train_r2"]+best_models_copy["test_r2"]
@@ -674,13 +755,13 @@ Returns:
             break
     model = model_cls[best_model_name](**best_param_dict)
     model.fit(x_train, y_train)
-
     print("Saving the model , preprocessor...")
     model_path = os.path.join(artifacts_path, "model.pkl")
     preprocessor_path = os.path.join(artifacts_path, "preprocessor.pkl")
     to_save={
         "model":model,
-        "dependent_feature":dependent_feature
+        "dependent_feature":dependent_feature,
+        "drop_col":list(dropcorr)
     }
     with open(model_path, "wb") as f:
         pickle.dump(to_save, f)
@@ -689,6 +770,7 @@ Returns:
         with open(preprocessor_path, "wb") as f:
             pickle.dump(preprocessor, f)
     encoder_path = None
+    from mlforge.plots import plot_regression_metrics,plot_classification_metrics,feature_importance,create_cloud
     if classification or nlp:
         if encode:
             encoder_path = os.path.join(artifacts_path, "encoder.pkl")
@@ -696,7 +778,7 @@ Returns:
                 pickle.dump(le, f)
         response = {
         "Message": "Training completed successfully",
-        "Problem_type":"Classification",
+        "Problem type":"Classification",
             "Model": combined_score_ranking.iloc[0]["model"],
             "Output feature": dependent_feature,
             "Categorical features": cat_features,
@@ -715,11 +797,11 @@ Returns:
             "Dropped Columns":list(dropcorr)
     }
         if nlp: 
-            response["Problem_type"]="NLP"
-            create_cloud(df,plot_path)
+            response["Problem type"]="NLP"
+            plots+=create_cloud(df)
         if(response["Hyper tuned"]):
             response["Best Params"] = best_param_dict
-        plot_classification_metrics(model,x_train, y_train, x_test, y_test,plot_path=plot_path)
+        plots+=plot_classification_metrics(model,x_train, y_train, x_test, y_test)
     else:
         response={
             "Message": "Training completed successfully",
@@ -730,14 +812,18 @@ Returns:
             "Numerical features": num_features,
             "Train R2": round(float(combined_score_ranking.iloc[0]["train_r2"]),4),
             "Train RMSE": round(float(combined_score_ranking.iloc[0]["train_rmse"]),4),
+            "Train MAE": round(float(combined_score_ranking.iloc[0]["train_mae"]),4),
+            "Train MSE": round(float(combined_score_ranking.iloc[0]["train_mse"]),4),
             "Test R2": round(float(combined_score_ranking.iloc[0]["test_r2"]),4),
             "Test RMSE": round(float(combined_score_ranking.iloc[0]["test_rmse"]),4),
+            "Test MAE": round(float(combined_score_ranking.iloc[0]["test_mae"]),4),
+            "Test MSE": round(float(combined_score_ranking.iloc[0]["test_mse"]),4),
             "Hyper tuned": bool(combined_score_ranking.iloc[0]["tuned"]),
             "Dropped Columns":list(dropcorr)
         }
         if(response["Hyper tuned"]):
             response["Best Params"] = best_param_dict
-        plot_regression_metrics(model, x_train, y_train, x_test, y_test,feature_names,plot_path=plot_path)
+        plots+=plot_regression_metrics(model, x_train, y_train, x_test, y_test,feature_names)
     print("\n")
     print("="*55)
     for i in response:
@@ -760,235 +846,16 @@ Returns:
         "z_threshold": z_threshold,
         "overfit_threshold": overfit_threshold,
     }
-    with open(os.path.join(artifacts_path, "metrices.txt"), "w") as f:
-        for key, value in response.items():
-            f.write(f"{key}: {value}\n")
-        f.write("\n\n\n")
-        f.write("Arguments used :- \n")
-        for key,value in arguments.items():
-            f.write(f"{key}: {value}\n")
-
+    if not nlp:
+        plots+=feature_importance(model, feature_names)
+    generate_dashboard(plots,dashboard_path=os.path.join(artifacts_path, "Dashboard.html"),metrics=response,arguments=arguments,title=dashboard_title,model_comparison_df=best_models_copy)
     print("artifacts_path:", artifacts_path)
     print("model_path:", model_path)
     if not nlp : print("preprocessor_path:", preprocessor_path)
     if encoder_path:
         print("encoder_path:", encoder_path)
-    if not nlp:
-        feature_importance(model, plot_path, feature_names)
     shutil.rmtree(temp_path)
     # return {"status": "success", "model": "trained_model.pkl"}
-
-
-
-def plot_classification_metrics(model, X_train, y_train, X_test, y_test, plot_path,class_names=None):
-    # Predict
-    y_pred = model.predict(X_test)
-    y_proba = model.predict_proba(X_test)[:, 1] if hasattr(model, "predict_proba") else None
-  
-    unique_classes = model.classes_
-    # Confusion Matrix
-    cm = confusion_matrix(y_test, y_pred)
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=unique_classes)
-    disp.plot(cmap="Blues")
-    plt.title("Confusion Matrix")
-    plt.savefig(os.path.join(plot_path,"confusion_matrix.png"), bbox_inches='tight')
-    plt.close()
-    # ROC Curve
-    if y_proba is not None and len(np.unique(y_test)) == 2:
-        fpr, tpr, _ = roc_curve(y_test, y_proba)
-        RocCurveDisplay(fpr=fpr, tpr=tpr).plot(label="ROC Curve")
-        plt.title("ROC Curve")
-        plt.legend(loc="lower right")   # <-- Add legend manually
-        plt.savefig(os.path.join(plot_path, "roc_curve.png"), bbox_inches='tight')
-        plt.close()
-    # Precision-Recall Curve
-    if y_proba is not None and unique_classes.shape[0] == 2:
-        precision, recall, _ = precision_recall_curve(y_test, y_proba)
-        PrecisionRecallDisplay(precision=precision, recall=recall).plot()
-        plt.title("Precision-Recall Curve")
-        plt.savefig(os.path.join(plot_path,"precision_recall_curve.png"), bbox_inches='tight')
-        plt.close()
-    # Learning Curve
-    cv = min(5, np.min(np.bincount(y_train)))
-    train_sizes, train_scores, val_scores = learning_curve(model, X_train, y_train, cv=cv, scoring='accuracy')
-    plt.plot(train_sizes, np.mean(train_scores, axis=1), label="Train")
-    plt.plot(train_sizes, np.mean(val_scores, axis=1), label="Validation")
-    plt.title("Learning Curve (Accuracy)")
-    plt.xlabel("Training Set Size")
-    plt.ylabel("Accuracy")
-    plt.legend()
-    plt.savefig(os.path.join(plot_path,"Accuracy_curve.png"), bbox_inches='tight')
-    plt.close()
-
-    # Class Distribution
-    fig, ax = plt.subplots(1, 2, figsize=(10, 4))
-    sns.countplot(x=y_train, ax=ax[0])
-    ax[0].set_title("Training Class Distribution")
-    sns.countplot(x=y_test, ax=ax[1])
-    ax[1].set_title("Testing Class Distribution")
-    plt.savefig(os.path.join(plot_path,"class_distribution.png"), bbox_inches='tight')
-    plt.close()
-    
-    
-    
-
-def plot_regression_metrics(model, X_train, y_train, X_test, y_test,feature_names,plot_path):
-    y_pred = model.predict(X_test)
-    residuals = y_test - y_pred
-    # Actual vs. Predicted
-    plt.scatter(y_test, y_pred, alpha=0.7)
-    plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], '--r')
-    plt.xlabel("Actual")
-    plt.ylabel("Predicted")
-    plt.title("Actual vs. Predicted")
-    plt.savefig(os.path.join(plot_path,"actual_vs_predictes.png"), bbox_inches='tight')
-    plt.close()
-    # Residual Plot
-    plt.scatter(y_pred, residuals, alpha=0.7)
-    plt.axhline(0, color='red', linestyle='--')
-    plt.xlabel("Predicted")
-    plt.ylabel("Residuals")
-    plt.title("Residual Plot")
-    plt.savefig(os.path.join(plot_path,"residual.png"), bbox_inches='tight')
-    plt.close()
-    # Distribution of Residuals
-    sns.histplot(residuals, kde=True)
-    plt.title("Distribution of Residuals")
-    plt.xlabel("Residual")
-    plt.savefig(os.path.join(plot_path,"residual_distribution.png"), bbox_inches='tight')
-    plt.close()
-    # Learning Curve (R² or MSE)
-    train_sizes, train_scores, val_scores = learning_curve(model, X_train, y_train, cv=5, scoring='r2')
-    plt.plot(train_sizes, np.mean(train_scores, axis=1), label="Train")
-    plt.plot(train_sizes, np.mean(val_scores, axis=1), label="Validation")
-    plt.title("Learning Curve (R² Score)")
-    plt.xlabel("Training Set Size")
-    plt.ylabel("R² Score")
-    plt.legend()
-    plt.savefig(os.path.join(plot_path,"r2_score.png"), bbox_inches='tight')
-    plt.close()
-
-
-
-
-def feature_importance(model, plot_path, feature_names):
-    if hasattr(model, 'feature_importances_'):
-        importances = model.feature_importances_
-        # Clean feature names (remove 'StandardScaler__' prefix if present)
-        feature_clean_name=[]
-        for i in feature_names:
-            if i.split("__")[0] == "StandardScaler" or i.split("__")[0]=="OrdinalEncoder" :
-                feature_clean_name.append(i.split("__")[1])
-            elif (i.split("__")[0]=="OneHotEncoder" ):
-                category,value=i.split("__")[1].rsplit("_",1)
-                feature_clean_name.append(f"{category} : {value}")
-            else:
-                feature_clean_name.append(i)
-
-        # Convert to percentages and sort
-        importances = 100 * (importances / importances.sum())  # Convert to percentage of max importance
-        indices = np.argsort(importances)[ : :-1]  # Sort in descending order
-
-        # Plot
-        plt.figure(figsize=(8, max(4, len(importances) * 0.4)))
-        bars = plt.barh(range(len(importances)), importances[indices], align='center', color="skyblue")
-        
-        # Add percentage labels on each bar
-        for bar in bars:
-            width = bar.get_width()
-            plt.text(width + 0.5,  # x-position (just right of the bar)
-                    bar.get_y() + bar.get_height()/2,  # y-position (center of bar)
-                    f'{width:.1f}%',  # text
-                    va='center')  # vertical alignment
-        
-        plt.yticks(range(len(importances)), [feature_clean_name[i] for i in indices])
-        plt.gca().invert_yaxis()  # Highest importance at top
-        plt.xlabel("Global Importance (%)")
-        plt.title("Feature Importances")
-        plt.xlim(0, 110)  # Leave room for percentage labels
-        
-        os.makedirs(plot_path, exist_ok=True)
-        plt.savefig(os.path.join(plot_path, "feature_importances.png"), bbox_inches='tight')
-        plt.close()
-
-
-
-def data_cleaning(df, skew_thres, z_thres,target):
-    df.replace(["", "NA", "na", "N/A", "n/a", "?", "--", "-"], np.nan, inplace=True)
-    for col in df.columns:
-        if df[col].dtype == "object" or df[col].dtype.name == "category":
-            mode_vals = df[col].mode(dropna=True)
-            if not mode_vals.empty:
-                df[col] = df[col].fillna(mode_vals.iloc[0]) 
-            else:
-                df[col] = df[col].fillna("")  
-        else:
-            med = df[col].median()
-            if np.isnan(med):
-                med = 0
-            df[col] = df[col].fillna(med)  
-    df.drop_duplicates(inplace=True, ignore_index=True)
-    df = remove_outlier(df, skew_thres, z_thres,target)
-    return df
-
-
-def remove_outlier(df, skew_thres, z_thresh,target):
-    from scipy import stats
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-
-    for col in numeric_cols:
-        if df[col].nunique(dropna=True) <= 1 or col==target:  
-            continue
-
-        if abs(df[col].skew(skipna=True)) > skew_thres:
-            Q1 = df[col].quantile(0.25)
-            Q3 = df[col].quantile(0.75)
-            IQR = Q3 - Q1
-            lower_bound = Q1 - 1.5 * IQR
-            upper_bound = Q3 + 1.5 * IQR
-            mask = ((df[col] >= lower_bound) & (df[col] <= upper_bound)) | df[col].isna()
-            df = df[mask]
-        else:
-            z_score = stats.zscore(df[col], nan_policy='omit')
-            mask = (np.abs(z_score) <= z_thresh) | df[col].isna()
-            df = df[mask]
-
-    return df.reset_index(drop=True)
-
-def preprocess(text):
-    text=text.strip()
-    text=text.lower()
-    text=re.sub('[^a-z A-z 0-9-]+', '',text)
-    text=" ".join([y for y in text.split() if y not in stopword])
-    text=re.sub(r'(http|https|ftp|ssh)://([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:/~+#-]*[\w@?^=%&/~+#-])?', '' , str(text))
-    text= " ".join(text.split())
-    text=" ".join([lemmatizer.lemmatize(word) for word in text.split()])
-    return text
-
-def avg_wordtovec(doc,model):
-    vector=[model.wv[word] for word in doc if word in model.wv.index_to_key]
-    if not vector:
-        return np.zeros(model.vector_size)
-    return np.mean(vector,axis=0)
-
-def create_cloud(df, plot_path):
-    from wordcloud import WordCloud, STOPWORDS
-    os.makedirs(plot_path, exist_ok=True)
-    import matplotlib.pyplot as plt
-    text_data = " ".join(df["text"].astype(str).tolist())
-    stopwords = set(STOPWORDS)
-    wordcloud = WordCloud(
-        width=800,
-        height=400,
-        background_color="black",
-        stopwords=stopwords,
-        colormap="viridis"
-    ).generate(text_data)
-    plt.figure(figsize=(12, 6))
-    plt.imshow(wordcloud, interpolation="bilinear")
-    plt.axis("off")
-    plt.savefig(os.path.join(plot_path, "wordcloud.png"), bbox_inches='tight')
-    plt.close()
 
 
 def main():
@@ -1001,6 +868,7 @@ def main():
     parser.add_argument("--n_jobs", default=-1, type=int, help="Number of jobs to run in parallel")
     parser.add_argument("--n_iter", default=100, type=int, help="Number of iterations for hyperparameter tuning")
     parser.add_argument("--n_splits", default=5, type=int, help="Number of splits for cross-validation")
+    parser.add_argument("--test_size", default=0.2, type=float, help="Proportion of the dataset to include in the test split")
     parser.add_argument("--fast", action="store_true", default=False,
                        help="Enable fast mode for hyperparameter tuning (skip exhaustive tuning).")
     parser.add_argument("--artifacts_dir", default=None, help="Path to save the artifacts")
@@ -1012,7 +880,7 @@ def main():
                         help="If the difference between training and test F1 score exceeds this value, "
                              "the model is flagged as overfitting")
     parser.add_argument("--nlp", action="store_true", default=False,help="Enable NLP/text-mode processing (combine text cols, preprocess, vectorize).")
-
+    parser.add_argument("--dashboard_title", type=str, default="mlforgex Dashboard", help="Title of the dashboard")
     args = parser.parse_args()
 
     train_model(
@@ -1023,6 +891,7 @@ def main():
         n_jobs=args.n_jobs,
         n_iter=args.n_iter,
         n_splits=args.n_splits,
+        test_size=args.test_size,
         fast=args.fast,
         artifacts_dir=args.artifacts_dir,   
         artifacts_name=args.artifacts_name,
@@ -1030,7 +899,7 @@ def main():
         skew_threshold=args.skew_threshold,
         z_threshold=args.z_threshold,
         overfit_threshold=args.overfit_threshold ,
-        nlp=args.nlp)
+        nlp=args.nlp,
+        dashboard_title=args.dashboard_title
+    )
 
-if __name__ == "__main__":
-    train_model("cleaned_housing.csv", f1_prob=0.5, rmse_prob=0.3, dependent_feature="SalePrice", artifacts_name="housing_artifacts")
