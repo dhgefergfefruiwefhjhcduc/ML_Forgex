@@ -11,3 +11,5 @@ requests
 nltk
 gensim
 wordcloud
+plotly
+catboost

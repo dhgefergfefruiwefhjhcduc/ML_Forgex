@@ -93,8 +93,18 @@ reg_params = [
                 'epsilon': [0.01, 0.1, 0.2, 0.5, 1.0],
                 'gamma': ['scale', 'auto'] + [0.001, 0.01, 0.1, 1, 10],
                 'degree': [2, 3, 4]  # Only for poly kernel
+            }],
+            ["CatBoostRegressor", {
+                "iterations": [600, 900, 1200],
+                "learning_rate": [0.01, 0.02],
+                "depth": [4, 6, 8],
+                "l2_leaf_reg": [3, 5, 7],
+                "bagging_temperature": [0, 0.5, 1],
+                "bootstrap_type": ["Bayesian", "Bernoulli"],
+                "verbose": [False]
             }]
-        ]
+
+                 ]
 
 
 
@@ -180,7 +190,18 @@ class_params = [
             'alpha': [1e-4, 1e-3, 1e-2],
             'max_iter': [1000, 3000],
             'class_weight': [None, 'balanced'],
-        }]
+        }],
+
+        ["CatBoostClassifier", {
+            "iterations": [500, 800, 1200],
+            "learning_rate": [0.01, 0.02, 0.03],
+            "depth": [4, 6, 8],
+            "l2_leaf_reg": [1, 3, 5],
+            "bagging_temperature": [0, 0.5],
+            "bootstrap_type": ["Bayesian", "Bernoulli"],
+            "verbose": [False]
+}]
+
 
             
         
@@ -195,14 +216,14 @@ nlp_params= [
         'class_weight': [None, 'balanced'],
     }],
     
-    ["LinearSVC", {   # Better than SVC with kernel for NLP
+    ["LinearSVC", { 
         'C': [0.01, 0.1, 1, 10],
         'class_weight': [None, 'balanced'],
         'max_iter': [1000, 3000]
     }],
     
     ["RandomForestClassifier", {
-        'n_estimators': [10,20,50,100],
+        'n_estimators': [10,20,50,100,200],
         'max_depth': [None, 10],
         'min_samples_split': [2, 10],
         'class_weight': ['balanced'],
@@ -210,7 +231,7 @@ nlp_params= [
     }],
     
     ["XGBClassifier", {
-        'n_estimators': [10,20,50,100],
+        'n_estimators': [10,20,50,100,200],
         'learning_rate': [0.1, 0.2],
         'max_depth': [3, 5],
         'subsample': [0.8, 1.0],

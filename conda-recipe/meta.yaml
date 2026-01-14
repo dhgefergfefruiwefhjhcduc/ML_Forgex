@@ -1,0 +1,32 @@
+package:
+  name: mlforgex
+  version: "0.1.0"
+
+source:
+  url: https://pypi.io/packages/source/m/mlforgex/mlforgex-0.1.0.tar.gz
+  sha256: <PASTE_SHA256_FROM_PYPI>
+build:
+  noarch: python
+  script: "{{ PYTHON }} -m pip install . -vv"
+
+requirements:
+  host:
+    - python >=3.8
+    - pip
+  run:
+    - python >=3.8
+    - numpy
+    - scikit-learn
+
+test:
+  imports:
+    - mlforgex
+
+about:
+  home: https://github.com/yourusername/mlforgex
+  license: MIT
+  summary: "AutoML toolkit for fast model training"
+
+extra:
+  recipe-maintainers:
+    - your-github-username

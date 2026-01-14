@@ -1,22 +1,18 @@
 import pickle
-import pandas as pd;
-import os;
+import pandas as pd
+import os
+import numpy as np
 import gensim
 from nltk.tokenize import word_tokenize
-def predict(model_path,preprocessor_path,input_data, encoder_path=None,predicted_data=True,nlp=False):
+def predict(model_path,input_data,predicted_data=True,nlp=False):
         """
 Load a trained model and generate predictions on input data.
 
 Args:
     model_path (str):  
         File path to the serialized trained model (.pkl).
-    preprocessor_path (str):  
-        File path to the serialized preprocessor used for feature transformation.
     input_data (str):  
         File path to the input CSV containing data to predict on.
-    encoder_path (Optional[str], optional):  
-        File path to the serialized encoder for target label decoding 
-        (used if the target was encoded). Defaults to None.
     predicted_data (bool, optional):  
             If True, saves the input data with prediction column. Defaults to True.
     nlp (bool, optional):
@@ -32,7 +28,7 @@ Returns:
         A list of model predictions for the provided input data.
 
 Raises:
-    FileNotFoundError: If any of the provided file paths do not exist.
+    FileNotFoundError: If any of the provided file paths do not exist. All file preprocessor,encoder,metadata if exist should be in the artifacts folder.
     ValueError: If input data is empty or improperly formatted.
     Exception: For errors during preprocessing or prediction.
 
@@ -42,26 +38,43 @@ Example:
     """
 
         print("Loading the pickled model and preprocessor...")
-        data = pickle.load(open(model_path, 'rb'))
-        encoder = pickle.load(open(encoder_path, 'rb')) if encoder_path else None
+        model = pickle.load(open(model_path, 'rb'))
+        metadata= pickle.load(open(os.path.join(os.path.dirname(model_path),"metadata.pkl"), 'rb'))
+        encoder_path=os.path.exists(os.path.join(os.path.dirname(model_path),"encoder.pkl"))
+        encoder = pickle.load(open(os.path.join(os.path.dirname(model_path),"encoder.pkl"), 'rb')) if encoder_path else None
         df= pd.read_csv(input_data)
         if not nlp:
-            preprocessor = pickle.load(open(preprocessor_path, 'rb'))
+            df.drop(columns=metadata["drop_col"],inplace=True)
+            df.replace(["", "NA", "na", "N/A", "n/a", "?", "--", "-"], np.nan, inplace=True)
+            for col in df.columns:
+                if df[col].dtype == "object" or df[col].dtype.name == "category":
+                    mode_vals = df[col].mode(dropna=True)
+                    if not mode_vals.empty:
+                        df[col] = df[col].fillna(mode_vals.iloc[0]) 
+                    else:
+                        df[col] = df[col].fillna("")  
+                else:
+                    med = df[col].median()
+                    if np.isnan(med):
+                        med = 0
+                    df[col] = df[col].fillna(med) 
+            preprocessor_path=os.path.exists(os.path.join(os.path.dirname(model_path),"preprocessor.pkl"))
+            preprocessor = pickle.load(open(os.path.join(os.path.dirname(model_path),"preprocessor.pkl"), 'rb')) if preprocessor_path else None
             X = preprocessor.transform(df)
         else:
-            text_col=[i for i in df.columns if df[i].dtype=="object" and i!=data["dependent_feature"]]
+            text_col=[i for i in df.columns if df[i].dtype=="object" and i!=metadata["dependent_feature"]]
             df["new_text"] = df[text_col].astype(str).agg(" ".join, axis=1)
-            from mlforge.train import avg_wordtovec,preprocess
+            from mlforgex.cleaning import avg_wordtovec,preprocess
             df["new_text"] = df["new_text"].apply(preprocess)
             word_token=[word_tokenize(i) for i in df["new_text"]]
             mod = gensim.models.Word2Vec.load(os.path.join(preprocessor_path))
             vector_text=[avg_wordtovec(i,mod) for i in word_token]
             X = vector_text
-        predictions = data["model"].predict(X)
+        predictions = model.predict(X)
         if encoder_path:
             predictions = encoder.inverse_transform(predictions)
         if predicted_data:
-            df[data["dependent_feature"]] = predictions
+            df[metadata["dependent_feature"]] = predictions
             if nlp:
                 df.drop(columns=["new_text"],inplace=True)
             df.to_csv(os.path.join(os.path.dirname(model_path),"predicted_data.csv"),index=False)         
@@ -73,8 +86,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", required=True,help="Path to the model file")
     parser.add_argument("--input_data", required=True,help="Path to the input data CSV file")
-    parser.add_argument("--preprocessor_path", required=True,help="Path to the preprocessor file")
-    parser.add_argument("--encoder_path", required=False,help="Path to the encoder file")
     parser.add_argument(
     "--no-predicted_data",
     action="store_false",
@@ -84,6 +95,6 @@ def main():
 )
     parser.add_argument("--nlp", action="store_true", default=False, help="Enable NLP/text-mode")
     args = parser.parse_args()
-    print(predict(args.model_path, args.preprocessor_path, args.input_data, args.encoder_path,args.predicted_data,nlp=args.nlp))
-
+    predict(args.model_path, args.input_data,args.predicted_data,nlp=args.nlp)
+    print("Prediction completed and saved (if enabled).")
 

@@ -5,7 +5,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text(encoding="utf-8")
 setup(
     name="mlforgex",
-    version="1.0.14",
+    version="1.1.1",
     packages=find_packages(),
     install_requires = [
     "pandas",
@@ -20,15 +20,16 @@ setup(
     "requests",
     "nltk",
     "gensim",
-    "wordcloud"
-]
-,
+    "wordcloud",
+    "plotly",
+    "catboost"
+],
     long_description=long_description,
     long_description_content_type="text/markdown",
     entry_points={
         "console_scripts": [
-            "mlforge-train=mlforge.train:main",
-            "mlforge-predict=mlforge.predict:main"
+            "mlforgex-train=mlforgex.train:main",
+            "mlforgex-predict=mlforgex.predict:main"
         ]
     },
     author="Priyanshu Mathur",
@@ -43,7 +44,7 @@ setup(
     python_requires=">=3.8",
     project_urls={
         "Homepage": "https://github.com/dhgefergfefruiwefhjhcduc/ML_Forgex",
-        "Documentation": "https://github.com/dhgefergfefruiwefhjhcduc/ML_Forgex/blob/main/README.md",
+        "Documentation": "https://dhgefergfefruiwefhjhcduc.github.io/mlforgex_documentation/",
         "Source": "https://github.com/dhgefergfefruiwefhjhcduc/ML_Forgex",
         "Bug Tracker": "https://github.com/dhgefergfefruiwefhjhcduc/ML_Forgex/issues",
     }
