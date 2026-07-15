@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [version - 1.1.2] - 2026-07-15
+## [version - 1.2.0] - 2026-07-15
 
 ### Added
 - **LightGBM integration:** Full support for `LGBMClassifier` and `LGBMRegressor` models, optimized search grids in `params.py`, and updated dependencies in `requirements.txt`.
