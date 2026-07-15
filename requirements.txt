@@ -13,3 +13,5 @@ gensim
 wordcloud
 plotly
 catboost
+spacy
+lightgbm

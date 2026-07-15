@@ -5,7 +5,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text(encoding="utf-8")
 setup(
     name="mlforgex",
-    version="1.1.1",
+    version="1.2.0",
     packages=find_packages(),
     install_requires = [
     "pandas",
@@ -22,7 +22,9 @@ setup(
     "gensim",
     "wordcloud",
     "plotly",
-    "catboost"
+    "catboost",
+    "spacy",
+    "lightgbm"
 ],
     long_description=long_description,
     long_description_content_type="text/markdown",

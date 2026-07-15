@@ -102,6 +102,16 @@ reg_params = [
                 "bagging_temperature": [0, 0.5, 1],
                 "bootstrap_type": ["Bayesian", "Bernoulli"],
                 "verbose": [False]
+            }],
+            ["LGBMRegressor", {
+                'n_estimators': [100, 200, 300, 400],
+                'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.2],
+                'max_depth': [-1, 3, 5, 7, 9],
+                'num_leaves': [31, 50, 100],
+                'subsample': [0.6, 0.8, 1.0],
+                'colsample_bytree': [0.6, 0.8, 1.0],
+                'random_state': [42],
+                'verbose': [-1]
             }]
 
                  ]
@@ -200,9 +210,19 @@ class_params = [
             "bagging_temperature": [0, 0.5],
             "bootstrap_type": ["Bayesian", "Bernoulli"],
             "verbose": [False]
-}]
-
-
+        }],
+        
+        ["LGBMClassifier", {
+            'n_estimators': [100, 200, 300, 400],
+            'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.2],
+            'max_depth': [-1, 3, 5, 7, 9],
+            'num_leaves': [31, 50, 100],
+            'subsample': [0.6, 0.8, 1.0],
+            'colsample_bytree': [0.6, 0.8, 1.0],
+            'class_weight': [None, 'balanced'],
+            'random_state': [42],
+            'verbose': [-1]
+        }]
             
         
         ]

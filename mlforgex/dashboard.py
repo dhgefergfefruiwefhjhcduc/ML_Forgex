@@ -2,7 +2,8 @@ import plotly.io as pio
 import math
 import numpy as np
 import pandas as pd
-def generate_dashboard(plots, dashboard_path="Dashboard.html", title="mlforgex Dashboard", metrics=None, arguments=None,model_comparison_df=None):
+from mlforgex.logger import logger
+def generate_dashboard(plots, dashboard_path="Dashboard.html", title="mlforgex Dashboard", feature_overview=None, metrics=None, arguments=None,model_comparison_df=None):
     '''
     Generates a comprehensive HTML dashboard for visualizing model performance and metrics.
     Args:
@@ -11,10 +12,13 @@ def generate_dashboard(plots, dashboard_path="Dashboard.html", title="mlforgex D
         title (str): Title of the dashboard.
         metrics (dict): Dictionary of key metrics to display.
         arguments (dict): Dictionary of model arguments and hyperparameters.
-    
+        feature_overview (dict): Dictionary containing overview information for each feature.
     Returns:
         None
     '''
+    if feature_overview is None:
+        feature_overview = {}
+
     css = """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
@@ -738,6 +742,8 @@ def generate_dashboard(plots, dashboard_path="Dashboard.html", title="mlforgex D
                 'width': 700,
                 'scale': 1
             }
+            ,
+            'lazyLoad': True
         })
         
         dashboard_content += f"""
@@ -753,6 +759,79 @@ def generate_dashboard(plots, dashboard_path="Dashboard.html", title="mlforgex D
                                 </div>
                             </div>
         """
+
+        
+        # Initialize table with headers
+    dashboard_content += """
+    <div class="feature-overview-section" style="margin-top: 20px;">
+        <div class="premium-card" style="background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); border: 1px solid #e5e7eb;">
+            <div class="card-header" style="padding: 20px 24px; border-bottom: 1px solid #e5e7eb; background: linear-gradient(135deg, #1e293b 0%, #334155 100%);">
+                <div class="card-title" style="font-size: 1.25rem; font-weight: 600; color: white; display: flex; align-items: center; gap: 12px;">
+                    <i class="fas fa-table" style="color: #00c896;"></i>
+                    Feature Overview
+                </div>
+            </div>
+            <div class="card-content" style="padding: 0;">
+                <div class="model-table-container" style="overflow-x: auto;width: 100%;">
+                    <table class="model-table" style="width: 100%; border-collapse: collapse; font-family: 'Inter', sans-serif;">
+                        <thead>
+                            <tr style="background: linear-gradient(135deg, #0066ff 0%, #0052cc 100%);">
+    """
+    
+    columns = ["Feature Name", "Type", "Unique", "Missing %", "Min", "Max", "Mean", "Median", "Mode", "Std Dev", "25th %", "50th %", "75th %", "Skewness", "Outliers %"]
+    for col in columns:
+        dashboard_content += f'''
+                                <th style="padding: 16px 12px; color: white; font-weight: 600; font-size: 0.85rem; text-align: center; border-right: 1px solid rgba(255,255,255,0.1); text-transform: uppercase; letter-spacing: 0.5px;">
+                                    {col}
+                                </th>'''
+
+    dashboard_content += """
+                            </tr>
+                        </thead>
+                        <tbody>
+    """
+
+    # Populate rows dynamically
+    for idx, (key, value) in enumerate(feature_overview.items()):
+        row_bg = "background: #f8fafc;" if idx % 2 == 0 else "background: white;"
+        cell_style = "padding: 14px 12px; text-align: center; border-bottom: 1px solid #e5e7eb; color: #111827; font-weight: 500;"
+        feature_style = "padding: 14px 12px; text-align: center; border-bottom: 1px solid #e5e7eb; color: #111827; font-weight: 700;"
+
+        missing = f"{value['missing_percentage']:.2f}%" if value.get('missing_percentage') is not None else "-"
+        outliers = f"{value['outliers_percentage']:.2f}%" if value.get('outliers_percentage') is not None else "-"
+        mode_str = f"{value['mode']:.3f}" if isinstance(value.get('mode'), (int, float)) else str(value.get('mode', '-'))[:20]
+
+        dashboard_content += f"""
+                            <tr style="{row_bg} transition: all 0.2s ease;">
+                                <td style="{feature_style}">{key}</td>
+                                <td style="{cell_style}">{value.get('dtype', '-')}</td>
+                                <td style="{cell_style}">{value.get('num_unique', '-')}</td>
+                                <td style="{cell_style}">{missing}</td>
+                                <td style="{cell_style}">{f"{value['min']:.3f}" if value.get('min') is not None else "-"}</td>
+                                <td style="{cell_style}">{f"{value['max']:.3f}" if value.get('max') is not None else "-"}</td>
+                                <td style="{cell_style}">{f"{value['mean']:.3f}" if value.get('mean') is not None else "-"}</td>
+                                <td style="{cell_style}">{f"{value['median']:.3f}" if value.get('median') is not None else "-"}</td>
+                                <td style="{cell_style}">{mode_str}</td>
+                                <td style="{cell_style}">{f"{value['std']:.3f}" if value.get('std') is not None else "-"}</td>
+                                <td style="{cell_style}">{f"{value['25th percentile']:.3f}" if value.get('25th percentile') is not None else "-"}</td>
+                                <td style="{cell_style}">{f"{value['50th percentile']:.3f}" if value.get('50th percentile') is not None else "-"}</td>
+                                <td style="{cell_style}">{f"{value['75th percentile']:.3f}" if value.get('75th percentile') is not None else "-"}</td>
+                                <td style="{cell_style}">{f"{value['skewness']:.3f}" if value.get('skewness') is not None else "-"}</td>
+                                <td style="{cell_style}">{outliers}</td>
+                            </tr>
+        """
+
+    # Close the table tags
+    dashboard_content += """
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    """
+
+
 
     dashboard_content += """
                         </div>
@@ -1001,5 +1080,5 @@ def generate_dashboard(plots, dashboard_path="Dashboard.html", title="mlforgex D
 
     with open(dashboard_path, "w", encoding="utf-8") as f:
         f.write(dashboard_content)
-    print(f"Dashboard saved to {dashboard_path}")
+    logger.info(f"Dashboard saved to {dashboard_path}")
 
